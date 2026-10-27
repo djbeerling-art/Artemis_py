@@ -41,6 +41,7 @@ CLEAR = {
     "feedstock_remaining": "Remaining feedstock totals counted once",
     "uptake_totals": "dt_<nut>uptake = daily passive + daily active uptake",
     "cec_ratio_cells": "Per-cell release/CEC ratios use each cell's release",
+    "layer_solute_fluxes": "getlayerfluxes: each layer's solute export uses that layer's concentration, not the top cell's",
 }
 
 REVIEW = {

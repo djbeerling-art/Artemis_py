@@ -73,27 +73,38 @@ def published(name, outdir):
         yield f.name, text, datetime.datetime.strptime(m.group(1), "%d-%b-%Y %H:%M:%S")
 
 
-def check(name, outdir, published_parms=True):
-    """(result, published runname) for one scenario; result starts with OK when the day-1
-    input is byte-identical with one of the run's published inputs."""
+def build(name, published_parms=True, fixes=None):
+    """(ds, getphreeqcrun arguments, published runname) for a scenario, set up as its run
+    script does, with the authors' paths; raises NotImplementedError for missing options.
+    ``fixes`` is ``ds['fixes']`` (artemis_p.fixes)."""
     settings, runarg = ef2.scenario(name)
+    if fixes:
+        settings["fixes"] = tuple(fixes)
     if published_parms:
         settings["parm"].update(ef2.PUBLISHED_PARMS.get(name, {}))
-    pub_name = runarg[runarg.index("runname") + 1] if "runname" in runarg else ef2.POST_RUNNAME.get(name, settings.get("runname", name))
-    cands = list(published(pub_name, outdir))
-    if not cands:
-        return "NO PUBLISHED FILE", pub_name
+    pub_name = (runarg[runarg.index("runname") + 1] if "runname" in runarg
+                else ef2.POST_RUNNAME.get(name, settings.get("runname", name)))
     resolve, ef2dir = ef2_resolver()
     files = ef2.USEFILES.get(name, EF2_FILES)
-    try:
-        ds0 = complete_setup(setup_data_struc(settings, files, resolve, basedir=ef2dir), legacy_airpor=True)
-    except NotImplementedError as e:
-        return f"SETUP not ported: {e}", pub_name
+    ds = complete_setup(setup_data_struc(settings, files, resolve, basedir=ef2dir), legacy_airpor=True)
     rs = rbcomp_run_settings()
     rs["runname"] = settings.get("runname", rs["runname"])
     rs["runlab"] = settings.get("runlab", rs["runlab"])
     rs.update(ef2.POST_DS.get(name, {}))
-    ds0.update(rs)
+    ds.update(rs)
+    return ds, runarg, pub_name
+
+
+def check(name, outdir, published_parms=True):
+    """(result, published runname) for one scenario; result starts with OK when the day-1
+    input is byte-identical with one of the run's published inputs."""
+    try:
+        ds0, runarg, pub_name = build(name, published_parms)
+    except NotImplementedError as e:
+        return f"SETUP not ported: {e}", name
+    cands = list(published(pub_name, outdir))
+    if not cands:
+        return "NO PUBLISHED FILE", pub_name
     best = None
     for fname, text, now in cands:
         ds = copy.deepcopy(ds0)
