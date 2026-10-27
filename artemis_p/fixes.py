@@ -47,7 +47,7 @@ REVIEW = {
     "native_rsa_weighting": "setupsoilphases: weight native RSA by mineral proportion (nativeRSAscale was tuned without it)",
     "upflow_fractions": "setmixfracs2 top-down: upflow fraction relative to the source cell's water",
     "day1_soil_moisture": "getrichquick: fill Sws on day 1",
-    "bottom_layer_inflow": "soilwater_zengdecker2009: bottom layer keeps its inflow (halves the water table depth in rBcomp, with overflow warnings)",
+    "bottom_layer_inflow": "soilwater_zengdecker2009: bottom layer keeps its inflow. NOT VALID ALONE: in rBcomp the water table rises to the surface and drainage stops from 2019",
     "nfix_flag": "includeNfix=0 (the default) removes Nfix from the rates and KINETICS, so legumes stop fixing N",
 }
 
