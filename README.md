@@ -35,6 +35,21 @@ published runs. Set `ds["fixes"] = "all"` in the settings to fix the clear
 coding errors; see the Fixes section of
 [docs/PORTING_PLAN.md](docs/PORTING_PLAN.md) and `artemis_p/fixes.py`.
 
+## Speed
+
+A day takes about 1.2 s: about 0.8 s of PHREEQC kinetics (one simulation
+per soil cell), 0.1 s of mixing and 0.15 s of Python. Loading PHREEQC and the
+database takes only 0.02 s. Options for `PhreeqcRun`:
+
+- `cellworkers=N` runs the cells' kinetics in N parallel PHREEQC processes
+  after the day's mixing (`phreeqc.run_cells_parallel`). It agrees with a
+  serial run to about 1e-5, except in cells with almost no water (rBcomp
+  cell 2, frozen, 0.01 mm), where it is about 1e-4.
+- `printoutput=0` writes only warnings and errors to the `.out` file (about
+  0.1 s a day).
+
+Separate sites or scenarios can also run in parallel.
+
 ## Status
 
 - [x] PHREEQC runner, selected-output reader, MATLAB `.mat` reference loader
