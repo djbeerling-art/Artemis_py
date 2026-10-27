@@ -9,6 +9,7 @@ PHREEQC input files that getphreeqcrun.m writes:
 * NaN and Inf print as ``NaN`` and ``Inf``.
 """
 
+import functools
 import math
 import re
 
@@ -39,9 +40,25 @@ def _num(v):
     return v
 
 
-def _convert(m, v):
-    flags, width, prec, conv = m.group("flags"), m.group("width") or "", m.group("prec"), m.group("conv")
-    p = f".{prec}" if prec is not None else ""
+@functools.lru_cache(maxsize=None)
+def _parse(fmt):
+    """The format as a list of literal strings and conversions (flags, width, prec, conv, C format)."""
+    parts, pos = [], 0
+    for m in _SPEC.finditer(fmt):
+        parts.append(fmt[pos:m.start()])
+        pos = m.end()
+        flags, width, prec, conv = m.group("flags"), m.group("width") or "", m.group("prec"), m.group("conv")
+        if conv == "%":
+            parts.append("%")
+            continue
+        p = f".{prec}" if prec is not None else ""
+        parts.append((flags, width, p, conv, f"%{flags}{width}{p}{conv}"))
+    parts.append(fmt[pos:])
+    return parts, any(isinstance(x, tuple) for x in parts)
+
+
+def _convert(spec, v):
+    flags, width, p, conv, cfmt = spec
     if conv == "s":
         if not isinstance(v, str):
             v = _num(v)
@@ -56,31 +73,24 @@ def _convert(m, v):
         return f"%{flags.replace('0', '')}{width}s" % txt
     if conv in "diouxX":
         if x.is_integer():
-            return f"%{flags}{width}{p}{conv}" % int(x)
+            return cfmt % int(x)
         return f"%{flags}{width}e" % x  # MATLAB: %d of a non-integer uses %e
-    return f"%{flags}{width}{p}{conv}" % x
+    return cfmt % x
 
 
 def sprintf(fmt, *args):
     """Format like MATLAB's sprintf (escape sequences are taken from the Python string)."""
-    specs = [m for m in _SPEC.finditer(fmt) if m.group("conv") != "%"]
+    parts, hasspecs = _parse(fmt)
     flat = _flatten(args)
     out, idx = [], 0
     while True:
-        pos = 0
-        for m in _SPEC.finditer(fmt):
-            out.append(fmt[pos:m.start()])
-            pos = m.end()
-            if m.group("conv") == "%":
-                out.append("%")
+        for part in parts:
+            if not isinstance(part, tuple):
+                out.append(part)
                 continue
             if idx >= len(flat):
-                if flat or idx > 0:
-                    return "".join(out)
-                pos = len(fmt)  # no arguments at all: MATLAB prints the literal text only
-                break
-            out.append(_convert(m, flat[idx]))
+                return "".join(out)
+            out.append(_convert(part, flat[idx]))
             idx += 1
-        out.append(fmt[pos:])
-        if not specs or idx >= len(flat):
+        if not hasspecs or idx >= len(flat):
             return "".join(out)

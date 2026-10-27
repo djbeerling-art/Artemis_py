@@ -78,9 +78,17 @@ def get_selected_output(path):
     lines = Path(path).read_text().splitlines()
     heads = [h.strip() for h in lines[0].split("\t")]
     rows = [[v.strip() for v in l.split("\t")] for l in lines[1:] if l.strip()]
+    cols = None
+    if rows and all(len(r) == len(heads) for r in rows):
+        cols = []  # columns as float arrays, or None for a column with text in it
+        for col in zip(*rows):
+            try:
+                cols.append(np.array(col, dtype=float))
+            except ValueError:
+                cols.append(None)
     ntext = 0
     for j in range(len(heads)):
-        if heads[j] and any(_is_text(r[j]) for r in rows if j < len(r)):
+        if heads[j] and (cols[j] is None if cols is not None else any(_is_text(r[j]) for r in rows if j < len(r))):
             ntext = j + 1
     s = {"filename": str(path), "label": {}}
     for j, h in enumerate(heads):
@@ -90,6 +98,8 @@ def get_selected_output(path):
         s["label"][fld] = h.replace("_", " ")
         if j < ntext:
             s[fld] = [r[j] for r in rows]
+        elif cols is not None:
+            s[fld] = cols[j]
         else:
             s[fld] = np.array([float(r[j]) for r in rows])
     if "state" in s and "sim" in s:
