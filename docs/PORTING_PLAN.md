@@ -77,9 +77,11 @@ Plotting code (`getfig`, `show*`, figure scripts) is not ported.
    `gettotalfields`, `getbasesatpct`, `assessuptake` and `etaRH`;
    `PhreeqcRun.finish` runs them. Recomputed from the saved daily outputs they
    reproduce every saved total to 1e-9, and from the Python run they match the
-   saved totals to the same tolerance as the daily fields. Still to port:
-   `readobsdata`/`setruncellindices` and `assessrun2` (model-observation
-   comparison).)**
+   saved totals to the same tolerance as the daily fields. Observations:
+   `artemis_p.obs` ports `readobsdata`, `setruncellindices`, `assessrun2` and
+   `checkuselog`; the six EF observation tables match the saved `ds.obs`
+   exactly, and `assessrun2` on the saved run reproduces the saved
+   `out.obs` (matched model values and fit statistics) to 1e-9.)**
 
 ## Known issues in the published v1.1 archive
 

@@ -20,6 +20,7 @@ from .forcing import read_timeseries, set_run_time_arrays
 from .layers import read_init_layer_data
 from .periodictable import get_periodic_table
 from .phases import setup_phases
+from .obs import read_obs_data, set_run_cell_indices
 from .phasetable import get_phase_table
 from .sorption import cec_sorb, set_soil_texture
 from .species import set_model_species
@@ -29,7 +30,7 @@ from .treatments import process_timetable
 
 def read_input_files(ds, files, resolve=Path):
     """readinputfiles.m for initlayers, phases, timetable, timeseries, PSD and
-    initialChemistry files. Observation files are skipped (not ported yet).
+    initialChemistry and observation files.
 
     File names are recorded as given (in ``inputfiles``, ``provided``, ...),
     not as resolved.
@@ -76,6 +77,9 @@ def read_input_files(ds, files, resolve=Path):
             ds = read(read_initial_chemistry, f, influentfld=parm.get("influentfld", "rainwater"),
                       soilsolnfld=parm.get("soilsolnfld", "porewater"))
             ds["layer"]["source"]["soilsoln"] = f
+    for f in files:  # observations last; they need run indices and/or cell indices assigned later
+        if "obs_" in f:
+            ds = read_obs_data(ds, resolve(f), name=f)
     return ds
 
 
@@ -110,7 +114,7 @@ def setup_data_struc(ds, files, resolve=Path, basedir=None):
         print("(setupdatastruc) No PHREEQC cells; quitting")
         return ds
     ds = set_soil_texture(ds)
-    # setruncellindices(ds,'obs') matches observations to run days and cells (not ported yet)
+    ds = set_run_cell_indices(ds)
     if "exchange" in ds["cell"] or "available" in ds["cell"]:
         raise NotImplementedError("CECsorb with existing exchange/available data is not ported yet")
     ds = cec_sorb(ds)

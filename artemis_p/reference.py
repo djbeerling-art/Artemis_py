@@ -91,7 +91,10 @@ EF2_FILES = [
     "../EF_data/initlayers_Flanagan_EF_0-183cm.csv",
     "../EF_data/rainwater_Champaign_NTN_2021_initialChemistry.csv",
     "../EF_data/EF_maize_B0_timetable.csv",
-] + [f"../EF_data/EF_CLM5_2015-2070_timeseries_{f}.csv"
+] + [f"../EF_data/EF_obs_{f}.csv"
+     for f in ("total_cCaMgrelease_means_stdev_acrossallblocks_TiCat", "soil_sys_smallplots",
+               "soil_pH_largeplots_fromIlsaKantola_perscomm_10Feb2021", "soil_drains_insitu_SOTON",
+               "soil_drains_B0_SOTON", "soil_lysimeters_SOTON")] + [f"../EF_data/EF_CLM5_2015-2070_timeseries_{f}.csv"
      for f in ("soiltemp", "airtemp", "soilresp", "CO2atm", "snow", "infil_ET")]
 
 

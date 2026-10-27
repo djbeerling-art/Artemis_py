@@ -75,6 +75,11 @@ def main(ndays, work):
         for p, v in saved["run"][k].items():
             if p in r.out["run"][k]:
                 compare(k, {p: r.out["run"][k][p]}, {p: v}, ndays)
+    for g, parts in r.out.get("obs", {}).items():
+        for name, t in parts["assess"].items():
+            ref = saved["obs"][g]["assess"][name]
+            for c in t.columns:
+                print(f"obs {g} {name[:40]} {c}: RMSE {t.loc['RMSE', c]:.4g} (saved {ref[c][0]:.4g})")
     if ndays == len(saved["run"]["current"]):
         name = f"{RBCOMP}.in"
         pub = (Path(os.environ["ARTEMIS_PHREEQC"]) / name).read_text()

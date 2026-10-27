@@ -295,10 +295,31 @@ def _rbcomp_preprocessed():
     return setup_data_struc(rbcomp_settings(), EF2_FILES, resolve, basedir=ef2)
 
 
+def _check_obs_tables(obs, ref):
+    """Observation tables (DataFrames here) against MATLAB tables (dicts of columns)."""
+    import numpy as np
+
+    assert list(obs) == list(ref)
+    for g in ref:
+        assert list(obs[g]) == list(ref[g]), g
+        for name, rt in ref[g].items():
+            t = obs[g][name]
+            assert list(t.columns) == [c for c in rt if c != "_rownames"], name
+            for c in t.columns:
+                a, b = t[c].to_numpy(), np.asarray(rt[c])
+                if b.dtype.kind == "M":
+                    assert (a.astype("datetime64[ns]") == b).all(), (name, c)
+                elif b.dtype.kind in "fi":
+                    assert np.allclose(a.astype(float), b, rtol=1e-12, equal_nan=True), (name, c)
+                else:
+                    assert list(a) == list(b), (name, c)
+
+
 def test_preprocess_rbcomp():
     """setupdatastruc up to setrunarrays, end to end from the EF2 inputs."""
     ds, ref = _rbcomp_preprocessed(), ref_ds()
-    assert ds["inputfiles"] == [f for f in ref["inputfiles"] if "obs" not in f]
+    assert ds["inputfiles"] == ref["inputfiles"][:len(ds["inputfiles"])]
+    _check_obs_tables(ds["obs"], ref["obs"])
     assert matref.differences(ds["provided"], ref["provided"], "provided") == []
     run, rrun = ds["run"], ref["run"]
     # residue, rootresidue and mixfrac are filled in later by setuprun/setupnutuptake
@@ -500,3 +521,38 @@ def test_end_of_run_totals():
             a = out[grp][f]
             assert np.allclose(np.asarray(a, float).reshape(np.shape(b)), b, rtol=1e-9, atol=1e-12,
                                equal_nan=True), f"{grp}.{f}"
+
+
+def test_assess_observations():
+    """assessrun2 on the saved run reproduces the saved model-observation comparison."""
+    import copy
+
+    import numpy as np
+
+    from artemis_p.obs import assessrun2
+
+    run = matref.load_run(Path(os.environ["ARTEMIS_PHREEQC"]) / f"{RBCOMP}.mat")
+    ds = _rbcomp_preprocessed()
+    out = {k: copy.deepcopy(run[k]) for k in ("metadata", "soil", "total", "units", "label")}
+    del out["soil"]["runindex"]
+    assessrun2(out, {**run["ds"], "obs": ds["obs"], "pt2": ds["pt2"]})
+    assert np.array_equal(out["soil"]["runindex"], run["soil"]["runindex"])
+    ref = run["obs"]
+    assert list(out["obs"]) == list(ref)
+    for g in ref:
+        for part in ("yobs", "ymod", "assess"):
+            assert list(out["obs"][g][part]) == list(ref[g][part]), (g, part)
+            for name, rt in ref[g][part].items():
+                t = out["obs"][g][part][name]
+                cols = [c for c in rt if c != "_rownames"]
+                assert list(t.columns) == cols, (g, part, name)
+                if part == "assess":
+                    assert list(t.index) == list(rt["_rownames"])
+                for c in cols:
+                    a, b = t[c].to_numpy(), np.asarray(rt[c])
+                    if b.dtype.kind == "M":
+                        assert (a.astype("datetime64[ns]") == b).all(), (g, part, name, c)
+                    elif b.dtype.kind in "fi":
+                        assert np.allclose(a.astype(float), b, rtol=1e-9, equal_nan=True), (g, part, name, c)
+                    else:
+                        assert list(a) == list(b), (g, part, name, c)

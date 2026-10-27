@@ -22,6 +22,7 @@ import numpy as np
 
 from . import phreeqc
 from .mformat import sprintf
+from .obs import assessrun2
 from .rsa import update_rsa
 from .selected_output import get_selected_output, reshape_selected_output
 from .totals import gettotalfields
@@ -852,7 +853,8 @@ class PhreeqcRun:
         return res
 
     def finish(self):
-        """getphreeqcrun's cleanup: end-of-run totals (gettotalfields) and run metadata."""
+        """getphreeqcrun's cleanup: end-of-run totals (gettotalfields), the comparison
+        with observations (assessrun2) and run metadata."""
         ds, out, md = self.ds, self.out, self.out["metadata"]
         out["run"]["kinflag"] = self.kinflag
         md["scheme"] = self.scheme
@@ -867,6 +869,8 @@ class PhreeqcRun:
         gettotalfields(out, ds)
         out["total"]["label"]["exptday"] = "Day of experiment"
         out["label"]["exptday"] = "Day of experiment"
+        if "obs" in ds:
+            assessrun2(out, ds)
         start = md.get("istart0", self.istart)
         mins = sum(v for d, v in out["run"]["stopwatch"].items() if start <= d <= idone) / 60
         errs = [d for d, e in out["run"]["errdesc"].items() if e != "PHREEQC OK"]
