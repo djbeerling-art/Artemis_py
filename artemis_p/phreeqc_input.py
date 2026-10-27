@@ -16,6 +16,7 @@ surface areas for the next day.
 
 import datetime as _dt
 import math
+from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -67,6 +68,26 @@ def default_scheme():
 # (``exist(parmfld,'var')``); only the scalar run controls are listed.
 _PARM_VARS = ("nkinsteps", "stepdivide", "badstepmax", "cvode_steps", "SAmethod", "EXCHmethod",
               "vleachthresh", "saveinterval", "usefixedinfluent", "chargefld", "charge0fld")
+
+
+class TableValues:
+    """Scalar lookups ``tv(df, row, col)`` that skip DataFrame.loc, which deep-copies
+    the table's attrs (units, labels) on every call. Columns are cached until a
+    different table object is passed; call ``clear()`` after changing a table in place."""
+
+    def __init__(self):
+        self.df, self.cols = None, {}
+
+    def clear(self):
+        self.df, self.cols = None, {}
+
+    def __call__(self, df, row, col):
+        if df is not self.df:
+            self.df, self.cols = df, {}
+        c = self.cols.get(col)
+        if c is None:
+            c = self.cols[col] = dict(zip(df.index, df[col].to_numpy()))
+        return c[row]
 
 
 def gasmoles(ds, CO2gmol=0, O2gmol=0):
@@ -130,6 +151,7 @@ class PhreeqcRun:
 
     def __init__(self, ds, now=None, **opts):
         self.ds = ds
+        self.tv = TableValues()
         self.now = now or _dt.datetime.now()
         self.stg = default_settings()
         self.scheme = default_scheme()
@@ -235,6 +257,10 @@ class PhreeqcRun:
                 stg[k] = v
             elif k == "nyears":
                 stg["ndays"] = 365 * v
+            elif k in ("printoutput", "cellworkers"):
+                # port options: printoutput=0 keeps only warnings and errors in the .out file;
+                # cellworkers>1 runs the cells' kinetics in parallel (phreeqc.run_cells_parallel)
+                stg[k] = v
             elif k == "runname":
                 self.runname = v
                 self.out["metadata"]["runname"] = v
@@ -690,7 +716,8 @@ class PhreeqcRun:
         w("#PHREEQC run for %s\n", current)
         w("#Experiment: %s %s runname: %s\n", ds["expname"], out["metadata"]["runlab"], out["metadata"]["runname"])
         w("PRINT\n")
-        w("    -reset true\n")
+        # printoutput=0 (not in MATLAB) leaves the .out file with just warnings and errors
+        w("    -reset %s\n", "true" if stg.get("printoutput", 1) else "false")
         w("    -user_print true\n")
         self.writeselectedoutput()
         self.writepunch()
@@ -812,12 +839,16 @@ class PhreeqcRun:
         ds, stg, out = self.ds, self.stg, self.out
         run = ds["run"]
         tic = time.time()
+        self.tv.clear()
         text = self.write_input(i, now=now)
         fname = Path(self.fname)
         infile = fname.with_name(fname.name + ".in")
         infile.write_text(text)
-        res = phreeqc.run(infile, self.dbfile, outfile=fname.with_name(fname.name + ".out"),
-                          screenout=fname.with_name(fname.name + ".screenout"), exe=exe, cwd=cwd)
+        runner = phreeqc.run
+        if stg.get("cellworkers", 1) > 1:
+            runner = partial(phreeqc.run_cells_parallel, workers=stg["cellworkers"])
+        res = runner(infile, self.dbfile, outfile=fname.with_name(fname.name + ".out"),
+                     screenout=fname.with_name(fname.name + ".screenout"), exe=exe, cwd=cwd)
         out["run"]["nwarnings"][i] = len(res.warnings)
         if res.errors:
             out["run"]["errdesc"][i] = "\n".join(res.errors)
@@ -959,14 +990,14 @@ class PhreeqcRun:
             return
         pt = ds["phasetable"]
         expname = impname.replace("Implicit", "Explicit")
-        fs = pt.loc[impname, "feedstock"]
+        fs = self.tv(pt, impname, "feedstock")
         soil = out["soil"]
         grams = out["run"]["grams"][expname][:, i].copy()
         same = (pt["feedstock"].str.lower() == str(fs).lower()) & (pt["PHREEQCphase"] != impname)
         for ph in pt.index[same & (pt["PHREEQCphasetype"].str.lower() == "kinetic")]:
-            grams = grams + soil["k_" + pt.loc[ph, "MATLABphase"]][:, i - 1] * pt.loc[ph, "molmass"]
+            grams = grams + soil["k_" + self.tv(pt, ph, "MATLABphase")][:, i - 1] * self.tv(pt, ph, "molmass")
         for ph in pt.index[same & (pt["PHREEQCphasetype"].str.lower() == "equilibrium")]:
-            grams = grams + soil[pt.loc[ph, "MATLABphase"]][:, i - 1] * pt.loc[ph, "molmass"]
+            grams = grams + soil[self.tv(pt, ph, "MATLABphase")][:, i - 1] * self.tv(pt, ph, "molmass")
         out["run"]["grams"][expname][:, i] = grams
 
     def _use_cell(self, k):
@@ -1015,7 +1046,7 @@ class PhreeqcRun:
         w("    -equilibrium_phases CO2(g) O2(g) ")
         pt = ds.get("phasetable")
         for e in self.eqsolid:
-            w(" %s", pt.loc[e, "PHREEQCphase"])
+            w(" %s", self.tv(pt, e, "PHREEQCphase"))
         w("\n")
         w("    -saturation_indices CO2(g) O2(g)")
         for p in self.kinphase[: self.nkinphase]:
@@ -1371,7 +1402,7 @@ class PhreeqcRun:
         pt = ds.get("phasetable")
         if pt is not None:
             for e in self.eqsolid:
-                w("    %10s 0 %g; ", pt.loc[e, "PHREEQCphase"], run["moles"][e][k - 1, i - 1] / self.cellH2O[k - 1])
+                w("    %10s 0 %g; ", self.tv(pt, e, "PHREEQCphase"), run["moles"][e][k - 1, i - 1] / self.cellH2O[k - 1])
             w("\n")
 
     def initsoilcells(self):
@@ -1456,10 +1487,10 @@ class PhreeqcRun:
                 w("    %10s %g\n", "-moles", O2gmol)
             if stg["usedust"] and self.neqsolids > 0:
                 for e in self.eqsolid:
-                    fs = pt.loc[e, "feedstock"]
+                    fs = self.tv(pt, e, "feedstock")
                     if fs not in run.get("treatment", {}) or run["treatment"][fs][K, I] == 0:
                         continue
-                    w("-component %s\n", pt.loc[e, "PHREEQCphase"])
+                    w("-component %s\n", self.tv(pt, e, "PHREEQCphase"))
                     mol = run["moles"][e][K, I] / self.targH2O[K, I] + out["soil"][e][K, I - 1]
                     w("    %10s %g\n", "-moles", mol)
             if stg["useexchange"]:
@@ -1510,7 +1541,7 @@ class PhreeqcRun:
                 w("    %14s %g \n", "-d_params", ds["parm"]["impscale"])
             else:
                 w("    %14s %g %f %f %f %f %f %f\n", "-d_params", out["run"]["RSA0"][p][K, I], 1.0, 1.0, 1.0, targ,
-                  stg["skipSAinKINETICS"], pt.loc[p, "precipdissrat"] * run["targH2O"][K, I] * pt.loc[p, "reversible"])
+                  stg["skipSAinKINETICS"], self.tv(pt, p, "precipdissrat") * run["targH2O"][K, I] * self.tv(pt, p, "reversible"))
             w("    %10s %g \n", "-tol", 1e-7 if self.usemix else 1e-8)
         if ds["ETmethod"] == "KINETICS":
             w("    -component %s\n", "Evapotranspiration")
@@ -1637,7 +1668,7 @@ class PhreeqcRun:
         for p in self.kinphase[: self.nkinphase]:
             w("%s\n", p)
             if stg["kinrelease"]:
-                w("    %10s %s \n", "-formula", pt.loc[p, "formula"])
+                w("    %10s %s \n", "-formula", self.tv(pt, p, "formula"))
             else:
                 w("    %10s %s 1\n", "-formula", p)
             mol = out["run"]["M0"][p][K, I] / targ
@@ -1647,7 +1678,7 @@ class PhreeqcRun:
                 w("    %14s %g \n", "-parms", ds["parm"]["impscale"])
             else:
                 w("    %10s %f %f %f %f %f %f %f\n", "-parms", out["run"]["RSA0"][p][K, I], 1.0, 1.0, 1.0, targ,
-                  stg["skipSAinKINETICS"], pt.loc[p, "precipdissrat"] * run["targH2O"][K, I] * pt.loc[p, "reversible"])
+                  stg["skipSAinKINETICS"], self.tv(pt, p, "precipdissrat") * run["targH2O"][K, I] * self.tv(pt, p, "reversible"))
             w("    %10s %g \n", "-tol", tol)
         if ds["ETmethod"] == "KINETICS":
             w("%s\n", "Evapotranspiration")

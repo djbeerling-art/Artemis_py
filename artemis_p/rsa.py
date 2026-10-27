@@ -15,6 +15,13 @@ def update_rsa(out, meth, ds, irun, phases):
     """
     pt, parm, run = ds["phasetable"], ds["parm"], ds["run"]
     I = irun - 1
+    col = {}
+
+    def tv(row, c):  # pt.loc deep-copies the table's attrs on every call
+        if c not in col:
+            col[c] = dict(zip(pt.index, pt[c].to_numpy()))
+        return col[c][row]
+
     for ph in phases:
         oldRSA = out["run"]["RSA0"][ph][:, I].copy()
         newRSA = oldRSA.copy()
@@ -31,13 +38,13 @@ def update_rsa(out, meth, ds, irun, phases):
         # MATLAB's per-phase fractal columns are tested with ismember on all
         # the table's variable names, which is never all true, so are never used
         elif fixed(ds, "fractal_per_phase"):
-            for col, d in (("surfacefractal", 3), ("roughnessfractal", 2)):
-                if col in pt.columns and np.isfinite(pt.loc[ph, col]):
-                    Mratexp = (pt.loc[ph, col] - d) / 3
+            for fc, d in (("surfacefractal", 3), ("roughnessfractal", 2)):
+                if fc in pt.columns and np.isfinite(tv(ph, fc)):
+                    Mratexp = (tv(ph, fc) - d) / 3
                     break
         lam = Mrat ** Mratexp
-        if pt.loc[ph, "reversible"]:
-            scl = pt.loc[ph, "molmass"] / pt.loc[ph, "G"] / 1e6
+        if tv(ph, "reversible"):
+            scl = tv(ph, "molmass") / tv(ph, "G") / 1e6
             for j in range(ds["ncells"]):
                 M0j, Mj = M0[j], M[j]
                 if M0j == 0 and Mj > 0:  # nucleation
