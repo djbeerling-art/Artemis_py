@@ -34,7 +34,7 @@ Plotting code (`getfig`, `show*`, figure scripts) is not ported.
 
 1. **Infrastructure (done).** PHREEQC runner, `.sel` reader and comparison,
    `.mat` loader, rBcomp day-1 regression test.
-2. **Input reading (~2,000 lines; in progress: `readcsvdata`, `getperiodictable`, `readtimetable`, `getdecyear`, `getscreenedtable` done).** `readinputfiles`, `readcsvdata`,
+2. **Input reading (~2,000 lines; in progress: `readcsvdata`, `getperiodictable`, `readtimetable`, `getdecyear`, `getscreenedtable`, `setmodelspecies`, `readinitlayerdata` done).** `readinputfiles`, `readcsvdata`,
    `readtimetable`, `readinitlayerdata`, `readobsdata`, `getscreenedtable`,
    `getphasetable`, `getperiodictable`, `setmodelspecies`, `getdecyear`.
    Checked against `ds.timetable`, `ds.layer`, `ds.phasetable` in the `.mat`.
@@ -73,6 +73,12 @@ flagged here to fix once the port is verified.
   by 400", which makes 2000 a non-leap year (and 1900 and 2100 leap years).
   This doesn't affect 2001-2099, but the spin-up runs (`rspin*`) start in
   January 2000. Python: `timetable.is_leap_matlab`.
+
+- **NaN filling (`readinitlayerdata.m` `fillNaN`).** `for inan=wnan` loops
+  over a column vector, so it runs once with the whole vector. Gaps fill
+  correctly only when a parameter has exactly one missing layer. The EF input
+  has no gaps, so the published runs are unaffected. Python fills each gap
+  (`layers.fill_nan`).
 
 ## MATLAB call graph (rBcomp entry points)
 

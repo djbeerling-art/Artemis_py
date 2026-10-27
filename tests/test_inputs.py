@@ -38,3 +38,24 @@ def test_timetable():
     # setupdatastruc/processtimetable later renames feedstock treatments to ds.parm.fsname.
     ours = {k: v for k, v in ds["timetable"].items() if k != "treatment"}
     assert matref.differences(ours, {k: ref[k] for k in ours}, "timetable") == []
+
+
+def test_model_species():
+    from artemis_p.species import set_model_species
+
+    assert matref.differences(set_model_species(), ref_ds()["solute"], "solute") == []
+
+
+def test_init_layer_data():
+    from artemis_p.layers import read_init_layer_data
+
+    fname = Path(os.environ["ARTEMIS"]) / "examples" / "EF_data" / "initlayers_Flanagan_EF_0-183cm.csv"
+    ds = read_init_layer_data({"parm": {}}, fname)
+    ref = ref_ds()["layer"]
+    assert ds["nlayers"] == ref_ds()["nlayers"]
+    # soilsoln is completed later from the initialChemistry file and wcell by
+    # getcellsfromlayers; source holds the authors' relative paths.
+    skip = {"soilsoln", "wcell", "source"}
+    ours = {k: v for k, v in ds["layer"].items() if k not in skip}
+    assert matref.differences(ours, {k: v for k, v in ref.items() if k not in skip}, "layer") == []
+    assert set(ds["layer"]["source"]) == set(ref["source"]) - {"soilsoln"}
