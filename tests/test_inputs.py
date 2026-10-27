@@ -343,3 +343,54 @@ def test_day_swat():
     assert matref.differences(ds["cell"]["evapfrac"], ref["cell"]["evapfrac"], "evapfrac", rtol=1e-12) == []
     for k in ("conc", "massfrac", "source", "stoichN"):
         assert matref.differences(ds["cropstoich"][k], ref["cropstoich"][k], k, rtol=1e-12) == [], k
+
+
+@lru_cache(maxsize=2)
+def _rbcomp_setup(legacy_airpor=True):
+    import copy
+
+    from artemis_p.setuprun import complete_setup
+
+    return complete_setup(copy.deepcopy(_rbcomp_preprocessed()), legacy_airpor=legacy_airpor)
+
+
+def test_richards_and_mixing():
+    """getrichquick/soilwatermovement (Richards) and setmixfracs2 (top-down MIX fractions)."""
+    ds, ref = _rbcomp_setup(), ref_ds()
+    run, rrun = ds["run"], ref["run"]
+    for k in ("watertabledepth", "aquifer", "qflx_drain_day", "excess", "targH2O", "Sws", "Swstot", "inperc",
+              "outperc", "qinday", "qoutday", "h2osoi_liq", "h2osoi_ice", "h2osoi_liq0", "eff_porosity",
+              "vwc_liq", "hk", "imped", "den", "dwat2", "xsi", "rsub_top_layer", "ice", "H2OSOI",
+              "mixfrac", "postmix", "cellFC", "ETmix", "postmixET", "postET", "leachmix"):
+        assert matref.differences(run[k], rrun[k], k, rtol=1e-9, atol=1e-10) == [], k
+    # smp reaches -1e8 mm, and num is a difference of such values; qcharge is ~1e-8 mm/s
+    for k in ("smp", "num"):
+        assert matref.differences(run[k], rrun[k], k, rtol=1e-9, atol=1e-6) == [], k
+    assert matref.differences(run["qcharge"], rrun["qcharge"], "qcharge", rtol=1e-9, atol=1e-20) == []
+    for k in ("nmix", "nmixleach", "nmixdrain", "ETmethodlabel", "cellwatermethod"):
+        assert matref.differences(ds[k], ref[k], k) == [], k
+
+
+def test_soil_gases_and_nutrients():
+    """setuprun/setsoilco2 (getsoilCO2g, Cerling 1991) and setupnutuptake."""
+    ds, ref = _rbcomp_setup(), ref_ds()
+    run, rrun = ds["run"], ref["run"]
+    for k in ("airpor", "trueairpor", "impermeabledepth", "cdepth", "phi0", "Sz11", "C1", "pCO2g", "si_CO2g",
+              "soilCO2gppmV", "pO2g", "si_O2g", "Nindex", "Pindex", "Kindex", "Caindex", "Clindex", "Feindex"):
+        assert matref.differences(run[k], rrun[k], k, rtol=1e-9, atol=1e-14) == [], k
+    for k in ("pO2g", "si_O2g"):
+        assert matref.differences(ds["cell"][k], ref["cell"][k], k) == [], k
+    assert ds["nut"] == ref["nut"]
+    assert ds["uptakeformula"] == ref["uptakeformula"]
+    assert ds["parm"]["soilco2opt"] == ref["parm"]["soilco2opt"]
+
+
+def test_airpor_v11():
+    """The v1.1 code sets run.airpor = por - Sws in getrichquick, which getsoilCO2g then uses."""
+    import numpy as np
+
+    ds = _rbcomp_setup(False)
+    run = ds["run"]
+    assert np.allclose(run["airpor"], np.asarray(ds["cell"]["por"])[:, None] - run["Sws"])
+    assert "trueairpor" not in run
+    assert (run["pCO2g"] >= _rbcomp_setup()["run"]["pCO2g"] - 1e-15).all()

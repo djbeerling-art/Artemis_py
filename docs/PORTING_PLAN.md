@@ -43,7 +43,12 @@ Plotting code (`getfig`, `show*`, figure scripts) is not ported.
    `pedotransfer`, `markPSDinit`, `getRosinRammlerPSD`, `setnucSA`,
    `setstoichiometry`, `CECsorb`, `Cerling1991`, `getfert`, `setupnutuptake`,
    `writePHASESRATES`. Checked against the matching `ds` fields.
-4. **Climate and hydrology (~6,000 lines).** `setuprun`, `daySWAT7`,
+4. **Climate and hydrology (~6,000 lines; done for the rBcomp path:
+   `daySWAT7`, `setuprun`, `getrichquick`/`soilwatermovement` (CLM5
+   zengdecker_2009 Richards solver, phase change, water table, drainage),
+   `setmixfracs2` (top-down), `getsoilCO2g` (Cerling 1991 time series) and
+   `setupnutuptake`; all 2,192 days match the saved ds to ~1e-11. Not ported:
+   `bucket`, bottom-up mixing, `SWATsnow`, `potET`, `getsoilresp`, drains).** `setuprun`, `daySWAT7`,
    `SWATsnow`, `potET`, `getsoilCO2g`, `getsoilresp`, `setmixfracs2`,
    `bucket`, `getrichquick`, `soilwatermovement`, `drainrate`. Checked against
    `ds.run` (mixing fractions, temperatures, CO2).
@@ -67,6 +72,17 @@ Plotting code (`getfig`, `show*`, figure scripts) is not ported.
   `UAN28`, so it is left over from another run. The published rBcomp `.out`
   echoes a UAN28 version, which the port rebuilds from `Pellets.dat`
   (`treatments.treatment_rates_text`) and matches.
+- **The published runs predate the v1.1 hydrology code.** The rBcomp `.mat`
+  is dated 3 June 2026, but `getrichquick.m` and `setuprun.m` were changed on
+  20 and 21 June 2026. The saved ds has no `run.sat` or
+  `run.qflx_rootsoi_day`, has `run.trueairpor`, and keeps
+  `parm.draindepthm = 1.3` (v1.1 sets it to -1). Most importantly, v1.1
+  getrichquick sets `run.airpor = por - Sws`, so getsoilCO2g no longer uses
+  its own `max(por - fc, por - Sws)`. With the v1.1 code, soil pCO2 for
+  rBcomp is a median 1.8 to 5.4 times higher per cell than in the published
+  run (up to 12 times; mean 0.14 atm instead of 0.025 to 0.034 atm in the
+  30 to 124 cm cells). `setup_run(..., legacy_airpor=True)` reproduces the
+  published values; the default follows v1.1.
 
 ## Bugs found in the MATLAB code
 
@@ -186,6 +202,41 @@ flagged here to fix once the port is verified.
 - **P uptake rescaling (`daySWAT7.m` `getcellup`).** `celluptake.P(1,w)` rescales
   only the top cell (N uses `(:,w)`). In rBcomp the P arrays are then replaced
   by the N-ratio values from cropstoichiometry.csv, so the result is unaffected.
+- **Upward-flow mixing fractions (`setmixfracs2.m`, top-down).** Column
+  `i+2` of MIX `i` is cell `i+1`'s solution, so upward flow into cell `i` should
+  be `upflow(i)/targH2O(i+1)`. The code first sets `inflow(i+1)/targH2O(i+1)`
+  (and `upflow(2)/targH2O(2)` for MIX 1), then overwrites MIXes 1 to n-2 with
+  `upflow(i)/targH2O(i)`, the wrong cell's water. MIX n-1 keeps
+  `inflow(n)/targH2O(n)`, which is downward inflow, not upflow. Nothing is
+  taken out of cell `i+1` for the water that moves up.
+- **Bottom soil layer misses its inflow (`soilwatermovement.m`,
+  `soilwater_zengdecker2009`).** When the water table is below the soil column
+  (as in rBcomp), the flux into the bottom layer is stored in a local `qin`
+  instead of `c.qin`, so `rmx(nlevsoi)` uses 0 for the inflow and water
+  leaving layer `nlevsoi-1` never arrives. In rBcomp this is the deepest added
+  CLM5 layer (about 8 m), so the top 8 cells are not directly affected.
+- **Added CLM5 layers (`soilwatermovement.m` `getds`).** The overlap fix for
+  the first layer below the soil cells is applied at index `nlevsoi+1` (after
+  `nlevsoi` already counts the added layers), so the layer at 1.83 to 2.08 m
+  overlaps the bottom soil cell and a deeper layer gets a 0.57 m thickness.
+  Initial water in the added layers uses `clm5.dz(nwadd)` (one thickness for
+  all of them) rather than `clm5.dz(wadd)`. CLM5 `dz` is also built as the
+  distance between node depths, not interface depths.
+- **Frost table (`soilwatermovement.m` `WaterTable`).** The search sets `kfrz`
+  instead of `k_frz`, so the frost table is always the top or bottom layer.
+  (`Drainage` has it right.)
+- **Day-1 soil moisture is zero (`getrichquick.m`).** `run.Sws` and
+  `run.Swstot` are only filled from day 2, so day 1 has zero moisture,
+  `airpor = por` and `sat = 0`.
+- **Frozen cells have almost no water.** Frozen water is held as ice inside
+  `soilwatermovement`, and `run.targH2O` is the liquid part only. In rBcomp
+  cells 2 and 3 (10 to 38 cm) start frozen and are refilled to 0.01 mm
+  (`watmin`) from below, so PHREEQC sees 0.01 mm of water there. This may be
+  intended.
+- **Last-day terms in `SL` (`getsoilCO2g.m`).** Inside the day loop
+  `p.SL=p.phi0.*...` uses the whole `phi0` row with day `i`'s `cdepth` and
+  `Dsoil`, so only the last day's values survive. `SL` is only used when
+  `correctforfinitesoildepth` is set.
 - **CEC scaling ignored (`CECsorb.m`).** If `ds.scale` exists without a `CEC`
   field (EF has `ds.scale.pCO2g`), `parm.CECscl` is ignored.
 
