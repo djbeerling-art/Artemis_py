@@ -122,3 +122,47 @@ def test_climate_forcing():
         assert matref.differences(run[k], rrun[k], k, rtol=1e-12, atol=1e-12) == [], k
         assert run["units"][k] == rrun["units"][k]
         assert Path(ds["provided"][k]).name == Path(ref["provided"][k]).name
+
+
+def _ef_phase_table():
+    from artemis_p.phasetable import get_phase_table
+
+    root = Path(os.environ["ARTEMIS"])
+    files = [root / "examples" / "EF_data" / "Richland_loess_Batestown_till_phases_combined.csv"] + [
+        root / "phreeqcdbincludefiles" / f
+        for f in ("secondary_phases.csv", "feedstock_phases_pure.csv", "feedstock_phases_Lewis_THERMODDEM.csv")
+    ]
+    t = None
+    for f in files:
+        t = get_phase_table(f, t)
+    return t
+
+
+def test_cells_from_layers():
+    import numpy as np
+
+    from artemis_p.cells import get_cells_from_layers
+    from artemis_p.chemistry import read_initial_chemistry
+    from artemis_p.layers import read_init_layer_data
+
+    data = Path(os.environ["ARTEMIS"]) / "examples" / "EF_data"
+    ds = {"parm": {"nativeRSAscale": 1e-6, "implicit": ["Titanite_blueridge", "Hydroxyapatite_blueridge"]},
+          "phasetable": _ef_phase_table()}
+    ds = read_init_layer_data(ds, data / "initlayers_Flanagan_EF_0-183cm.csv")
+    ds = read_initial_chemistry(ds, data / "rainwater_Champaign_NTN_2021_initialChemistry.csv")
+    ds = get_cells_from_layers(ds)
+    ref = ref_ds()
+    cell, rcell = ds["cell"], ref["cell"]
+    # Changed later: soilsoln (setupphases adds species), CEC (CECsorb converts
+    # units), moles/RSA (moved into ds.run and zeroed), labels/units/source.
+    later = {"soilsoln", "moles", "RSA", "CEC", "label", "units", "source"}
+    for k in cell:
+        if k not in later:
+            assert matref.differences(cell[k], rcell[k], k, rtol=1e-10) == []
+    for ph, v in cell["moles"].items():
+        assert np.allclose(v, np.asarray(ref["run"]["moles"][ph])[:, 0], rtol=1e-10), ph
+        assert np.allclose(cell["RSA"][ph], np.asarray(ref["run"]["RSA"][ph])[:, 0], rtol=1e-10), ph
+    pt, rpt = ds["phasetable"], ref["phasetable"]
+    for i, r in enumerate(rpt["_rownames"]):
+        if r in pt.index:
+            assert pt.loc[r, "PHREEQCphasetype"] == rpt["PHREEQCphasetype"][i], r

@@ -38,7 +38,7 @@ Plotting code (`getfig`, `show*`, figure scripts) is not ported.
    `readtimetable`, `readinitlayerdata`, `readobsdata`, `getscreenedtable`,
    `getphasetable`, `getperiodictable`, `setmodelspecies`, `getdecyear`.
    Checked against `ds.timetable`, `ds.layer`, `ds.phasetable` in the `.mat`.
-3. **Soil, phases and chemistry setup (~4,000 lines).** `setupphases`,
+3. **Soil, phases and chemistry setup (~4,000 lines; in progress: `getcellsfromlayers`, `setupsoilphases`, `pedotransfer`, full `checkphasetype` done).** `setupphases`,
    `setupsoilphases`, `checkphasetype`, `implicitcalc`, `getcellsfromlayers`,
    `pedotransfer`, `markPSDinit`, `getRosinRammlerPSD`, `setnucSA`,
    `setstoichiometry`, `CECsorb`, `Cerling1991`, `getfert`, `setupnutuptake`,
@@ -127,6 +127,14 @@ flagged here to fix once the port is verified.
 - **Stale index (`settimeseries`).** For depth-resolved files with per-month
   units it reads `ds.run.units.(var{i})` with an `i` left over from an
   enclosing loop. No published input takes this path.
+
+- **Vector `if` (`pedotransfer.m`).** `if (om_frac>pcalpha)` and
+  `if (om_frac<1)` test vectors, so they are true only when *every* cell
+  qualifies. A profile mixing organic and mineral layers would get no
+  percolation term at all. The EF soils are all below the threshold, so they
+  are unaffected.
+- **Label slip (`getcellsfromlayers.m`).** It sets `units.thickness='fraction'`
+  where `units.frac` was meant. Cosmetic only.
 
 ## MATLAB call graph (rBcomp entry points)
 

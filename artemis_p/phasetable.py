@@ -118,25 +118,148 @@ def check_mech(t):
     return t
 
 
-def check_phase_type(t):
-    """checkphasetype.m called with a table and no options (as getphasetable.m does).
+PARMFLAGS = ["allkin", "alleq", "allreveq", "noncarbkin", "nonCaCO3kin", "CaCO3eq", "carbeq",
+             "ignorefeedstock", "ignorecategory", "ignorenative", "ignoreeq"]
+PARMLISTS = ["seteq", "setkin", "ignore", "implicit", "ignorefeedstock", "ignorecategory"]
 
-    Phases with no PHREEQCphasetype become ``ignore`` if log10k_Eq is not
-    finite, ``equilibrium`` if they have no kinetic mechanisms, otherwise
-    ``kinetic``.
+
+def _as_list(v):
+    if v is None:
+        return []
+    return list(v) if isinstance(v, (list, tuple)) else [v]
+
+
+def _find_phase(t, name):
+    """First row whose MATLABphase (else PHREEQCphase) matches ``name``, case-insensitively."""
+    for col in ("MATLABphase", "PHREEQCphase"):
+        hits = [i for i, v in enumerate(t[col]) if str(v).lower() == name.lower()]
+        if hits:
+            return hits[0]
+    return None
+
+
+def check_phase_type(t, ds=None, quiet=True, **opts):
+    """checkphasetype.m.
+
+    Fills empty PHREEQCphasetype values (``ignore`` if log10k_Eq is not
+    finite, ``equilibrium`` with no kinetic mechanisms, else ``kinetic``),
+    then applies the global flags (``allkin``, ``carbeq``, ...) and the
+    per-phase lists (``seteq``, ``setkin``, ``ignore``, ``implicit``, ...).
+    Options come from ``ds["parm"]`` when ``ds`` is given, overridden by
+    keyword arguments.
+
+    Returns the table, or ``ds`` (with ``ds["phasetable"]`` updated) when ``ds``
+    is given. implicitcalc is called when the set of implicit phases changes.
     """
+    parm = {k: [] for k in PARMLISTS}
+    flags = {k: 0 for k in PARMFLAGS}
+    if ds is not None:
+        t = ds["phasetable"]
+        for k in PARMLISTS:
+            if k in ds.get("parm", {}):
+                parm[k] = _as_list(ds["parm"][k])
+        for k in PARMFLAGS:
+            if k in ds.get("parm", {}):
+                flags[k] = ds["parm"][k]
+    for k, v in opts.items():
+        if k in PARMLISTS:
+            parm[k] = _as_list(v)
+        elif k in PARMFLAGS:
+            flags[k] = v
+    t = t.copy()
     if "PHREEQCphasetype" not in t:
         t["PHREEQCphasetype"] = ""
-    pt = t["PHREEQCphasetype"].astype(object).copy()
-    empty = pt == ""
-    logk = pd.to_numeric(t["log10k_Eq"], errors="coerce")
-    pt[empty & ~np.isfinite(logk)] = "ignore"
-    empty = pt == ""
-    pt[empty & (t["nkinmechs"] <= 0)] = "equilibrium"
-    empty = pt == ""
-    pt[empty & (t["nkinmechs"] > 0)] = "kinetic"
+    pt = t["PHREEQCphasetype"].astype(object).tolist()
+    wimp0 = [p.lower() == "implicit" for p in pt]
+    nwimp0 = sum(wimp0) if "impmolrat" in t else 0
+
+    logk = pd.to_numeric(t["log10k_Eq"], errors="coerce").to_numpy()
+    nkin = t["nkinmechs"].to_numpy(dtype=float)
+    for i in range(len(pt)):
+        if pt[i] == "" and not np.isfinite(logk[i]):
+            pt[i] = "ignore"
+    for i in range(len(pt)):
+        if pt[i] == "" and nkin[i] <= 0:
+            pt[i] = "equilibrium"
+    for i in range(len(pt)):
+        if pt[i] == "" and nkin[i] > 0:
+            pt[i] = "kinetic"
+
+    low = lambda v: str(v).lower()
+    formula = t["formula"].tolist() if "formula" in t else [""] * len(pt)
+    if flags["allkin"]:
+        for i in range(len(pt)):
+            if nkin[i] > 0 and low(pt[i]) == "equilibrium":
+                pt[i] = "kinetic"
+    elif flags["noncarbkin"] or flags["nonCaCO3kin"]:
+        key = "CO3" if flags["noncarbkin"] else "CaCO3"
+        bad = [key in str(f) for f in formula]
+        for i in range(len(pt)):
+            if not bad[i] and nkin[i] > 0 and low(pt[i]) == "equilibrium":
+                pt[i] = "kinetic"
+        for i in range(len(pt)):
+            if bad[i]:
+                pt[i] = "equilibrium"
+    elif flags["carbeq"] or flags["CaCO3eq"]:
+        key = "CO3" if flags["carbeq"] else "CaCO3"
+        for i in range(len(pt)):
+            if key in str(formula[i]) and low(pt[i]) == "kinetic":
+                pt[i] = "equilibrium"
+    elif flags["alleq"]:
+        pt = ["equilibrium" if low(p) == "kinetic" else p for p in pt]
+    elif flags["allreveq"]:
+        rev = t["reversible"].to_numpy(dtype=float)
+        for i in range(len(pt)):
+            if rev[i] > 0 and low(pt[i]) == "kinetic":
+                pt[i] = "equilibrium"
+
+    def set_named(names, value):
+        for name in names:
+            i = _find_phase(t, name)
+            if i is None:
+                print(f"{name} not found in phase table")
+            else:
+                pt[i] = value
+
+    set_named(parm["seteq"], "equilibrium")
+    set_named(parm["setkin"], "kinetic")
+    cats = t["category"].tolist() if "category" in t else [""] * len(pt)
+    feeds = t["feedstock"].tolist() if "feedstock" in t else [""] * len(pt)
+    for cat in parm["ignorecategory"]:
+        if cat.lower() == "all":
+            continue
+        for i in range(len(pt)):
+            if low(cats[i]) == cat.lower():
+                pt[i] = "ignore"
+    igfs = parm["ignorefeedstock"]
+    if igfs and igfs[0].lower() == "all":
+        igfs = sorted({feeds[i] for i in range(len(pt)) if low(cats[i]) == "feedstock"})
+    for fs in igfs:
+        for i in range(len(pt)):
+            if low(feeds[i]) == fs.lower():
+                pt[i] = "ignore"
+    if flags["ignorenative"]:
+        for i in range(len(pt)):
+            if low(cats[i]) in ("soil", "native"):
+                pt[i] = "ignore"
+    if flags["ignoreeq"]:
+        pt = ["ignore" if low(p) == "equilibrium" else p for p in pt]
+    set_named(parm["ignore"], "ignore")
+    set_named(parm["implicit"], "implicit")
+
     t["PHREEQCphasetype"] = pt
-    return t
+    wimp = [p.lower() == "implicit" for p in pt]
+    needimpcalc = (nwimp0 != sum(wimp)) or any(a != b for a, b in zip(wimp0, wimp))
+    if ds is None:
+        if needimpcalc:
+            print("WARNING: implicit phases have changed; need to run implicitcalc")
+        return t
+    ds["phasetable"] = t
+    if needimpcalc:
+        ds["parm"]["implicit"] = parm["implicit"]
+        from .implicit import implicit_calc
+        ds = implicit_calc(ds, quiet=quiet)
+    return ds
 
 
 def _pad_value(col):
