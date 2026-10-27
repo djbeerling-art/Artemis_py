@@ -1,0 +1,204 @@
+# Paddy (riceland) chemistry for ARTEMIS: decoupled redox species and the kinetic
+# redox ladder of the SCEPTER paddy module (process spec v15, riceland_process_spec.md).
+# INCLUDE$ after THAmmOrgAlP.dat. N is already decoupled there (Amm, None, Nzero).
+#
+# Every reaction is a KINETICS entry whose -formula is its net change to the
+# solution, balanced in mass and oxidation state, so that PHREEQC's pe never moves
+# electrons between pathways. CH4, O2 and sulfide are decoupled for that reason.
+# The solids (OM, ferrihydrite, green rust, goethite, FeS, urea) are KINETICS pools
+# that do not touch the solution; each pool's rate is the net of the reactions.
+# Paddy_rates (listed first in KINETICS) evaluates every rate law once, in SCEPTER
+# units (mol m-3 bulk yr-1), and PUTs them; the other entries GET their own.
+#
+# Parameters (KINETICS -parms of Paddy_rates):
+#   1 f    litres of pore water per m3 of bulk soil, phi*S_w*1000 (500 when flooded)
+#   2 Sw   water saturation (f_sat = min(2 Sw, 1))
+#   3 OMin OM input, mol C m-3 yr-1
+#   4 Uin  urea input, mol m-3 yr-1
+#   5 TC   soil temperature, C (Q10 terms, reference 25 C)
+
+SOLUTION_MASTER_SPECIES
+Mtg      Mtg            0.0     16.042          16.042   # CH4, kept out of redox equilibrium
+Oxg      Oxg            0.0     32.0            32.0     # O2, kept out of redox equilibrium
+Hsg      Hsg-           0.0     33.072          32.064   # sulfide HS-, kept out of redox equilibrium
+
+SOLUTION_SPECIES
+Mtg = Mtg
+        log_k   0.0
+        -dw     1.85e-9
+Oxg = Oxg
+        log_k   0.0
+        -dw     2.35e-9
+Hsg- = Hsg-
+        log_k   0.0
+        -gamma  3.5     0.0
+        -dw     1.73e-9
+Hsg- + H+ = HHsg
+        log_k   6.994
+        -delta_h -5.30 kcal
+        -dw     2.1e-9
+
+PHASES
+Mtg(g)
+        Mtg = Mtg
+        log_k   -2.86
+Oxg(g)
+        Oxg = Oxg
+        log_k   -2.8983
+
+RATES
+Paddy_rates
+-start
+  10 f = PARM(1) : sw = PARM(2) : omin = PARM(3) : uin = PARM(4) : tcel = PARM(5)
+  20 sec = 3.1536e7
+  30 fsat = 2 * sw : IF fsat > 1 THEN fsat = 1
+  40 q2 = 2 ^ ((tcel - 25) / 10) : q3 = 3 ^ ((tcel - 25) / 10)
+  # pools, mol m-3 bulk
+  50 g2 = KIN("Om") * f : fh = KIN("Ferrihydrite") * f : gr = KIN("Green_rust") * f
+  60 gt = KIN("Goethite_k") * f : fes = KIN("FeS_k") * f : urea = KIN("Urea_k") * f
+  # porewater, mol/L (concentrations, as SCEPTER without activities)
+  70 o2 = TOT("Oxg") : no3 = TOT("N") : so4 = TOT("S(6)") : ch4 = TOT("Mtg") : n2o = TOT("None") / 2
+  80 nh4 = MOL("AmmH+") : fe2 = TOT("Fe(2)") : fe2f = MOL("Fe+2") : hs = MOL("Hsg-") : hp = MOL("H+")
+  90 ph = -LOG10(hp)
+  # common modifiers
+ 100 fg2 = g2 / (g2 + 100)
+ 110 fo2 = 2.5e-7 / (o2 + 2.5e-7)
+ 120 fno3 = 11.3e-5 / (no3 + 11.3e-5)
+ 130 fph = EXP(-0.5 * (ph - 7) ^ 2)
+ 140 fgr = 0.3 : fepool = fh + 2 * fgr * gr
+ 150 r = 0.1 + 0.9 / (1 + 10 ^ (ph - 6.2))
+ # aerobic respiration (g2o2) plus SCEPTER's own aerobic OM turnover (1/8 yr-1 at 15 C, Q10 3)
+ 200 po2 = o2 / 1.26e-3
+ 210 rg2o2 = 300 * q2 * fg2 * o2 / (o2 + 5e-6) + 0.125 * 3 ^ ((tcel - 15) / 10) * g2 * po2 / (po2 + 0.121)
+ # Fe(III) reduction: ferrihydrite and green rust share one expression
+ 220 fe3 = 300 * q2 * fg2 * fo2 * fno3 * fsat / (fepool + 100)
+ 230 rg2fe3 = fe3 * fh : rg2gr = fe3 * 2 * fgr * gr
+ 240 rg2gt = 10 * q2 * fg2 * gt / (gt + 100) * fo2 * fno3 * fsat
+ 250 rg2so4 = 300 * q2 * fg2 * so4 / (so4 + 1e-4) * fo2 * fno3 * fsat
+ 260 rg2ch4 = 1630 * q3 * fg2 * 30 / (fepool + 30) * 1e-4 / (so4 + 1e-4) * fo2 * fno3 * fsat
+ 270 rch4o2 = 500 * q2 * ch4 / (ch4 + 5e-6) * o2 / (o2 + 2e-5)
+ # Fe(II) oxygenation (Singer and Stumm), dissolved Fe(II), to ferrihydrite
+ 280 rfe2o2 = f * fe2 * po2 * (8e13 * (1e-14 / hp) ^ 2 + 1e-7) * 525600
+ # green rust pH-stat: Fe2+ + 2 Fe(OH)3 + 2 H2O = Fe3(OH)8 + 2 H+, log K -9.98
+ 290 lnom = LOG(10) * (-9.98) + LOG(fe2f + 1e-30) - 2 * LOG(hp)
+ 300 IF lnom > 0 THEN fgrs = fh / (fh + 1) ELSE fgrs = gr / (gr + 1)
+ 310 rfe2gr = 1e4 * fsat * fgrs * lnom
+ 320 rgroxy = 1e7 * gr * o2
+ # FeS: Fe2+ + HS- = FeS + H+, log K 3.915
+ 330 lnom = LOG(10) * 3.915 + LOG(fe2f + 1e-30) + LOG(hs + 1e-30) - LOG(hp)
+ 340 IF lnom > 0 THEN ffes = 1 ELSE ffes = fes / (fes + 1)
+ 350 rfe2fs = 1e3 * fsat * ffes * lnom
+ 360 rfesox = 1e6 * fes * o2
+ # nitrogen
+ 370 ramo2o = 30 * q2 * nh4 / (nh4 + 14e-5) * o2 / (o2 + 2.41e-5) * fsat * fph
+ 380 den = 300 * q2 * fg2 * no3 / (no3 + 11.3e-5) * fo2 * fsat * fph
+ 390 rg2n21 = den * r : rg2n0 = 1.25 * den * (1 - r)
+ 400 rg2n2p = 300 * q2 * fg2 * n2o / (n2o + 5e-6) * 1e-3 / (no3 + 1e-3) * fo2 / (1 + (hp / 10 ^ -5.5) ^ 2) * fsat
+ 410 rurea = 73 * 2 ^ ((tcel - 25) / 10) * urea
+ # PUT the rates in mol kgw-1 s-1
+ 500 c = 1 / (f * sec)
+ 510 PUT(rg2o2 * c, 1) : PUT(rg2fe3 * c, 2) : PUT(rg2gr * c, 3) : PUT(rg2gt * c, 4)
+ 520 PUT(rg2so4 * c, 5) : PUT(rg2ch4 * c, 6) : PUT(rch4o2 * c, 7) : PUT(rfe2o2 * c, 8)
+ 530 PUT(rfe2gr * c, 9) : PUT(rgroxy * c, 10) : PUT(rfe2fs * c, 11) : PUT(rfesox * c, 12)
+ 540 PUT(ramo2o * c, 13) : PUT(rg2n21 * c, 14) : PUT(rg2n0 * c, 15) : PUT(rg2n2p * c, 16)
+ 550 PUT(rurea * c, 17) : PUT(omin * c, 18) : PUT(uin * c, 19)
+ 600 SAVE 0
+-end
+
+# reactions: net change to the solution per mol of extent (see -formula in KINETICS)
+g2o2
+-start
+ 10 SAVE GET(1) * TIME
+-end
+g2fe3
+-start
+ 10 SAVE GET(2) * TIME
+-end
+g2gr
+-start
+ 10 SAVE GET(3) * TIME
+-end
+g2gt
+-start
+ 10 SAVE GET(4) * TIME
+-end
+g2so4
+-start
+ 10 SAVE GET(5) * TIME
+-end
+g2ch4
+-start
+ 10 SAVE GET(6) * TIME
+-end
+ch4o2
+-start
+ 10 SAVE GET(7) * TIME
+-end
+fe2o2
+-start
+ 10 SAVE GET(8) * TIME
+-end
+fe2gr
+-start
+ 10 SAVE GET(9) * TIME
+-end
+groxy
+-start
+ 10 SAVE GET(10) * TIME
+-end
+fe2fs
+-start
+ 10 SAVE GET(11) * TIME
+-end
+fesox
+-start
+ 10 SAVE GET(12) * TIME
+-end
+amo2o
+-start
+ 10 SAVE GET(13) * TIME
+-end
+g2n21
+-start
+ 10 SAVE GET(14) * TIME
+-end
+g2n0
+-start
+ 10 SAVE GET(15) * TIME
+-end
+g2n2p
+-start
+ 10 SAVE GET(16) * TIME
+-end
+ureah
+-start
+ 10 SAVE GET(17) * TIME
+-end
+
+# pools: rates are their net consumption
+Om
+-start
+ 10 s = GET(1) + GET(2) + GET(3) + GET(4) + GET(5) + GET(6) + GET(14) + GET(15) + GET(16) - GET(18)
+ 20 SAVE s * TIME
+-end
+Ferrihydrite
+-start
+ 10 SAVE (4 * GET(2) + 2 * GET(9) - GET(8) - 3 * GET(10)) * TIME
+-end
+Green_rust
+-start
+ 10 SAVE (2 * GET(3) - GET(9) + GET(10)) * TIME
+-end
+Goethite_k
+-start
+ 10 SAVE 4 * GET(4) * TIME
+-end
+FeS_k
+-start
+ 10 SAVE (GET(12) - GET(11)) * TIME
+-end
+Urea_k
+-start
+ 10 SAVE (GET(17) - GET(19)) * TIME
+-end
+END
