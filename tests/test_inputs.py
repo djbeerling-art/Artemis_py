@@ -428,3 +428,41 @@ def test_day1_phreeqc_input(tmp_path):
     close = cmp.drop(index=[c for c in ("Anatase", "d_Anatase", "AnataseRLBT", "d_AnataseRLBT") if c in cmp.index])
     assert close.loc["pH", "max_abs"] < 1e-5
     assert close["max_abs"].max() < 1e-3
+
+
+def test_first_days_match_saved_outputs(tmp_path):
+    """getphreeqcrun's daily loop (later-day inputs, KINETICS_MODIFY, selected output,
+    RSA update) reproduces the saved daily soil outputs for the first days."""
+    import copy
+    import datetime
+
+    import numpy as np
+
+    from artemis_p import phreeqc
+    from artemis_p.phreeqc_input import PhreeqcRun
+    from artemis_p.reference import rbcomp_run_settings, stage_ef2_dir
+
+    try:
+        phreeqc.find_phreeqc()
+    except FileNotFoundError:
+        pytest.skip("PHREEQC not available")
+    run = matref.load_run(Path(os.environ["ARTEMIS_PHREEQC"]) / f"{RBCOMP}.mat")
+    artemis = Path(os.environ["ARTEMIS"])
+    ef2 = stage_ef2_dir(tmp_path, artemis, os.environ.get("ARTEMIS_FLANAGAN"))
+    ds = copy.deepcopy(_rbcomp_setup())
+    ds.update(rbcomp_run_settings(dbdir=f"{artemis / 'phreeqcdbincludefiles'}/", outdir=f"{ef2}/"))
+    r = PhreeqcRun(ds, now=datetime.datetime(2026, 6, 3, 15, 17, 52))
+    ndays = 3
+    for i in range(1, ndays + 1):
+        assert r.run_day(i).ok
+    ref = run["soil"]
+    # Anatase flips between present and absent at saturation; charge and pct_err are ~0
+    skip = {"Anatase", "d_Anatase", "AnataseRLBT", "d_AnataseRLBT", "charge", "pct_err"}
+    for f, v in r.out["soil"].items():
+        if f in skip or f not in ref:
+            continue
+        b = np.asarray(ref[f], float)[:, :ndays]
+        assert np.allclose(v[:, :ndays], b, rtol=1e-3, atol=1e-9, equal_nan=True), f
+    for p in r.kinphase:
+        b = np.asarray(run["run"]["RSA"][p], float)[:, :ndays]
+        assert np.allclose(r.out["run"]["RSA"][p][:, :ndays], b, rtol=1e-4, atol=1e-12), p

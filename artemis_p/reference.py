@@ -30,6 +30,23 @@ def artemis_root():
     return Path(root)
 
 
+def stage_ef2_dir(workdir, artemis=None, flanagan=None, pellets=("UAN28",)):
+    """Make ``workdir/EF2`` (with Pellets.RATES) and ``workdir/EF_CLM5`` (with
+    the Flanagan PHASES/RATES file) so the EF2 runs' relative INCLUDE$ paths work
+    when PHREEQC runs in ``workdir/EF2``. Returns the EF2 directory."""
+    artemis = Path(artemis or artemis_root())
+    workdir = Path(workdir)
+    ef2 = workdir / "EF2"
+    ef2.mkdir(parents=True, exist_ok=True)
+    (workdir / "EF_CLM5").mkdir(exist_ok=True)
+    (ef2 / "Pellets.RATES").write_text(
+        treatment_rates_text(artemis / "phreeqcdbincludefiles", "Pellets", list(pellets)))
+    flanagan = Path(flanagan) if flanagan else artemis / "examples" / "EF_CLM5" / FLANAGAN
+    if flanagan.exists():
+        shutil.copy(flanagan, workdir / "EF_CLM5" / FLANAGAN)
+    return ef2
+
+
 def stage_init_run(name, phreeqc_dir, workdir, artemis=None, flanagan=None, pellets=("UAN28",), text=None):
     """Copy ``<name>.in_init`` into ``workdir/EF2`` with paths rewritten.
 
@@ -42,15 +59,7 @@ def stage_init_run(name, phreeqc_dir, workdir, artemis=None, flanagan=None, pell
     Returns the path of the staged .in file.
     """
     artemis = Path(artemis or artemis_root())
-    workdir = Path(workdir)
-    ef2 = workdir / "EF2"
-    ef2.mkdir(parents=True, exist_ok=True)
-    (workdir / "EF_CLM5").mkdir(exist_ok=True)
-    (ef2 / "Pellets.RATES").write_text(
-        treatment_rates_text(artemis / "phreeqcdbincludefiles", "Pellets", list(pellets)))
-    flanagan = Path(flanagan) if flanagan else artemis / "examples" / "EF_CLM5" / FLANAGAN
-    if flanagan.exists():
-        shutil.copy(flanagan, workdir / "EF_CLM5" / FLANAGAN)
+    ef2 = stage_ef2_dir(workdir, artemis, flanagan, pellets)
     if text is None:
         text = (Path(phreeqc_dir) / f"{name}.in_init").read_text()
     text = phreeqc.relocate_input(text, {

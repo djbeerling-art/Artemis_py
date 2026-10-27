@@ -62,11 +62,19 @@ Plotting code (`getfig`, `show*`, figure scripts) is not ported.
    `KINETICS_MODIFY` for later days, which belong with stage 6. Porting this
    stage also added the harvest-residue step at the end of `setupdatastruc`
    (`setuprun.set_residues`).)**
-6. **Driver loop (~2,500 lines).** The rest of `getphreeqcrun`, plus
-   `getselectedoutput`, `reshapeselectedoutput`, `updateRSA`, `gasmoles`,
-   `assessrun2`, `gettotalfields`, `assessuptake`, `etaRH`, `getbasesatpct`,
-   `checkuselog`. Checked against the daily series in the `.mat` and the
-   final-day `.in`.
+6. **Driver loop (~2,500 lines). (Daily loop done: `PhreeqcRun.run_day`
+   with `updatesoilcells`, `KINETICS_MODIFY`, `getselectedoutput`,
+   `addtoselectedoutput`, `reshapeselectedoutput`, passive uptake,
+   `updateexplicitgrams` and `updateRSA` (`artemis_p.rsa`). The full
+   2,192-day rBcomp run (42 min) gives a final-day `.in` byte-identical to the
+   published one after relocating paths, `out.run` RSA/M0/grams and all
+   influent fields within 1e-3, and soil fields within 1e-3 except: Anatase
+   (degenerate equilibrium phase), `charge`/`pct_err`/`si_Goethite` (values
+   near zero), a few isolated points of `d_CO2g`, `d_O2g`, `EDL`,
+   `k_Suptake` at ~2% of tiny values, and two fields that MATLAB rewrites
+   after the loop: `k_DINuptake` (`assessuptake`) and leachate `mass_H2O`
+   (`gettotalfields`). Still to port: `gettotalfields`, `assessuptake`,
+   `etaRH`, `getbasesatpct`, `assessrun2`, `checkuselog`.)**
 
 ## Known issues in the published v1.1 archive
 
@@ -95,6 +103,10 @@ Plotting code (`getfig`, `show*`, figure scripts) is not ported.
 
 ### Likely to affect published results
 
+- **Denitrification never sees the decomposing organic carbon
+  (`getphreeqcrun.m` `writekinetics`).** The daily update of percent organic C
+  for denitrification tests `isfield(out,'k_Nhuma')`, but the field lives in
+  `out.soil`, so `scheme.pctorgC` keeps its day-1 value for the whole run.
 - **Crop-specific uptake constants are never used (`setupnutuptake.m`).**
   `ds.run.crop` holds lower-case names (`maize`, `soybean`) but
   `MMuptakeparams.csv` uses `Maize`, `Soybean`, and the match is a
@@ -252,6 +264,22 @@ flagged here to fix once the port is verified.
   `p.SL=p.phi0.*...` uses the whole `phi0` row with day `i`'s `cdepth` and
   `Dsoil`, so only the last day's values survive. `SL` is only used when
   `correctforfinitesoildepth` is set.
+- **`k_DINuptake` is nitrate uptake only (`addtoselectedoutput`).** The loop
+  over N and Amm sets `k_DINuptake` from the first species found and never
+  adds the second, so it equals `k_Nuptake`. Harmless in the end:
+  `assessuptake` overwrites it with `k_Nuptake+k_Ammuptake` after the run.
+- **Leachate pH set on the wrong structure (`addtoselectedoutput`).** On days
+  without infiltration `out.pH(w)=NaN` writes to a stray top-level `out.pH`
+  instead of `m.pH`, using the leachate rows (the comment says influent). The
+  saved rBcomp `.mat` has this stray `pH` field.
+- **Passive uptake flag uses the cell index (`getphreeqcrun.m`).** The
+  passive-uptake update tests `ds.trnutflag(k)` with `k` left over from the cell
+  loops (always 1), not the nutrient index. No effect while all flags are 1.
+- **Per-phase fractal exponents never used (`updateRSA.m`).**
+  `ismember(ds.phasetable.Properties.VariableNames,'surfacefractal')` returns
+  one value per column, and `elseif` on that array is only true if every
+  column matches, so `surfacefractal`/`roughnessfractal` table columns are
+  ignored (the `ds.parm` versions work).
 - **Exchange species order changes after day 1 (`getphreeqcrun.m`
   `writeselectedoutput`).** The sorted list of exchange species is only built
   while `ds.cell.exchfld` is missing, i.e. on the first day. Later days write

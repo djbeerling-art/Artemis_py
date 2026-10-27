@@ -9,8 +9,9 @@ current input text exactly as the MATLAB fprintf calls do, including MATLAB's
 ``%d``-of-a-non-integer behaviour (see :mod:`artemis_p.mformat`).
 
 Day indices ``i`` are 1-based as in MATLAB; arrays are indexed with ``i - 1``.
-Only the initialising day (``initsoilcells``) is written so far; the later-day
-path (``updatesoilcells``) is stage 6 of the port.
+``run_day`` does one pass of getphreeqcrun's daily loop: write the input, run
+PHREEQC, read and reshape the selected output, and update moles and reactive
+surface areas for the next day.
 """
 
 import datetime as _dt
@@ -19,7 +20,10 @@ from pathlib import Path
 
 import numpy as np
 
+from . import phreeqc
 from .mformat import sprintf
+from .rsa import update_rsa
+from .selected_output import get_selected_output, reshape_selected_output
 
 MONTHNAME = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
@@ -307,6 +311,11 @@ class PhreeqcRun:
         self.iter = 0
         self.init = 1
         out["run"]["current"] = {}
+        out["_nrun"], out["_ncells"] = ds["nrun"], ds["ncells"]
+        if "grams" in run:
+            out["run"]["grams"] = {k: np.array(v, dtype=float) for k, v in run["grams"].items()}
+        for f in ("errdesc", "nwarnings", "stopwatch"):
+            out["run"][f] = {}
 
     def _uncharged_surface_sites(self):
         stg, cell = self.stg, self.ds["cell"]
@@ -731,6 +740,142 @@ class PhreeqcRun:
         w("    -all\n")
         w("END\n")
         return "".join(self._buf)
+
+    # ------------------------------------------------------------- daily loop
+    def run_day(self, i, now=None, exe=None, cwd=None):
+        """One pass of getphreeqcrun's loop for day ``i``. Returns the PHREEQC RunResult.
+
+        The input is written to ``<fname>.in`` (so ``outdir`` must be a local
+        directory); ``cwd`` is where PHREEQC runs, which matters for relative
+        INCLUDE$ paths. On the first day the files are also copied to ``*_init``.
+        """
+        import shutil
+        import time
+
+        ds, stg, out = self.ds, self.stg, self.out
+        run = ds["run"]
+        tic = time.time()
+        text = self.write_input(i, now=now)
+        fname = Path(self.fname)
+        infile = fname.with_name(fname.name + ".in")
+        infile.write_text(text)
+        res = phreeqc.run(infile, self.dbfile, outfile=fname.with_name(fname.name + ".out"),
+                          screenout=fname.with_name(fname.name + ".screenout"), exe=exe, cwd=cwd)
+        out["run"]["nwarnings"][i] = len(res.warnings)
+        if res.errors:
+            out["run"]["errdesc"][i] = "\n".join(res.errors)
+            return res
+        out["run"]["errdesc"][i] = "PHREEQC OK"
+        m = get_selected_output(fname.with_name(fname.name + ".sel"))
+        if "soln" not in m:
+            return res
+        m = self.addtoselectedoutput(m)
+        reshape_selected_output(m, out, i)
+        if self.init or self.iter == 1:
+            for ext in ("in", "out", "dmp", "sel"):
+                src = fname.with_name(f"{fname.name}.{ext}")
+                if src.exists():
+                    shutil.copy(src, fname.with_name(f"{fname.name}.{ext}_init"))
+        soil = out["soil"]
+        if stg["includeuptake"] and ds["ETmethod"].lower() == "mixflownut":
+            k = 1  # MATLAB tests trnutflag(k) with the cell index left over from the loops above (1)
+            for jnut in range(self.nnut):
+                if ds["trnutflag"][k - 1] == 0:
+                    continue
+                f = self.trnutfld[jnut]
+                prev = soil[f][:, i - 2] * self.planted[i - 1] if i > self.istart else 0
+                soil.setdefault(f, np.zeros((ds["ncells"], ds["nrun"])))[:, i - 1] = prev + soil["d" + f][:, i - 1]
+            f = "p_Ammuptake"
+            prev = soil[f][:, i - 2] * self.planted[i - 1] if i > self.istart else 0
+            soil.setdefault(f, np.zeros((ds["ncells"], ds["nrun"])))[:, i - 1] = prev + soil["d" + f][:, i - 1]
+            soil.setdefault("p_DINuptake", np.zeros((ds["ncells"], ds["nrun"])))[:, i - 1] = (
+                soil["p_Nuptake"][:, i - 1] + soil["p_Ammuptake"][:, i - 1])
+        for p in self.kinphase[: self.nkinphase]:
+            out["run"]["M"][p][:, i - 1] = soil["k_" + p][:, i - 1] * self.targH2O[:, i - 1]
+            if "Implicit_" in p:
+                self.updateexplicitgrams(p)
+        update_rsa(out, self.SAmethod, ds, i, self.kinphase[: self.nkinphase])
+        out["run"]["stopwatch"][i] = time.time() - tic
+        self.init = 0
+        return res
+
+    def addtoselectedoutput(self, m):
+        ds, out, i = self.ds, self.out, self.i
+        run = ds["run"]
+        soln = np.asarray(m["soln"])
+        mzer = soln * 0.0
+        m["iter"] = mzer + self.iter
+        m["runday"] = mzer + i
+        for f in ("decyear", "year", "doy", "month", "day", "exptday"):
+            m[f] = mzer + run[f][i - 1]
+        if all(f in m for f in ("m_HCO3", "m_CO3", "m_CO2")):
+            m["m_DIC"] = m["m_CO2"] + m["m_HCO3"] + m["m_CO3"]
+        m["cateq"] = 2 * (m["Ca"] + m["Mg"]) + m["Na"] + m["K"]
+        m["m_DIN"] = m["N"] + m["Amm"]
+        for sp in ("N", "Amm"):
+            if sp not in m:
+                continue
+            m["DIN"] = m[sp] if "DIN" not in m else m["DIN"] + m[sp]
+            kf = f"k_{sp}uptake"
+            if kf not in m:
+                continue
+            # only the first species found is used, so k_DINuptake is the nitrate uptake alone
+            if "k_DINuptake" not in m:
+                m["k_DINuptake"] = m[kf]
+                m["dk_DINuptake"] = m["d" + kf]
+        m["targH2O"] = mzer.copy()
+        m["targH2O"][soln == 0] = run["inperc"][0, i - 1]
+        for f in self.trnutfld[: self.nnut]:
+            m["d" + f] = np.zeros(len(soln))
+        m["dp_Ammuptake"] = np.zeros(len(soln))
+        m["dp_DINuptake"] = np.zeros(len(soln))
+        mixflownut = ds["ETmethod"].lower() == "mixflownut"
+        for jsol in range(1, ds["ncells"] + 1):
+            w = soln == jsol
+            if not w.any():
+                continue
+            m["targH2O"][w] = run["targH2O"][jsol - 1, i - 1]
+            if mixflownut:
+                tr = run["uptake"]["transpiration"][jsol - 1, i - 1]
+                for inut, n in enumerate(ds["nut"]):
+                    m["d" + self.trnutfld[inut]][w] = tr * m[n][w]
+                m["dp_Ammuptake"][w] = tr * m["Amm"][w]
+        if mixflownut:
+            m["dp_DINuptake"] = m["dp_Nuptake"] + m["dp_Ammuptake"]
+        w = np.flatnonzero(soln == self.ileach)
+        operc = run[self.outpercfld][ds["ncells"] - 1]
+        if len(w):
+            m["targH2O"][w] = operc[i - 1]
+        if np.sum(operc[:i]) == 0:
+            m["mass_H2O"][w] = 0
+        if operc[i - 1] < self.vleachthresh:
+            m["pH"][w] = np.nan
+        if run[self.inpercfld][0, i - 1] <= 0:
+            # MATLAB writes out.pH (not m.pH), and uses the leachate rows here, not the influent's
+            if len(w):
+                pH = out.get("pH", np.zeros(0))
+                if pH.size < w.max() + 1:
+                    pH = np.concatenate([pH, np.zeros(w.max() + 1 - pH.size)])
+                pH[w] = np.nan
+                out["pH"] = pH
+            m["mass_H2O"][w] = 0
+        return m
+
+    def updateexplicitgrams(self, impname):
+        ds, out, i = self.ds, self.out, self.i
+        if i >= self.ilast:
+            return
+        pt = ds["phasetable"]
+        expname = impname.replace("Implicit", "Explicit")
+        fs = pt.loc[impname, "feedstock"]
+        soil = out["soil"]
+        grams = out["run"]["grams"][expname][:, i].copy()
+        same = (pt["feedstock"].str.lower() == str(fs).lower()) & (pt["PHREEQCphase"] != impname)
+        for ph in pt.index[same & (pt["PHREEQCphasetype"].str.lower() == "kinetic")]:
+            grams = grams + soil["k_" + pt.loc[ph, "MATLABphase"]][:, i - 1] * pt.loc[ph, "molmass"]
+        for ph in pt.index[same & (pt["PHREEQCphasetype"].str.lower() == "equilibrium")]:
+            grams = grams + soil[pt.loc[ph, "MATLABphase"]][:, i - 1] * pt.loc[ph, "molmass"]
+        out["run"]["grams"][expname][:, i] = grams
 
     def _use_cell(self, k):
         self._w("USE solution %d; USE equilibrium_phases %d; ", k, k)
@@ -1185,7 +1330,53 @@ class PhreeqcRun:
         w("SELECTED_OUTPUT\n    -selected_out true\n")
 
     def updatesoilcells(self):
-        raise NotImplementedError("updatesoilcells (days after the first) is stage 6 of the port")
+        if self.init:
+            return
+        ds, stg, scheme, out, i = self.ds, self.stg, self.scheme, self.out, self.i
+        run, w = ds["run"], self._w
+        pt = ds.get("phasetable")
+        for k in range(1, ds["ncells"] + 1):
+            K, I = k - 1, i - 1
+            w("# Cell %d %s\n", k, out["run"]["current"][i])
+            w("SOLUTION_MODIFY %d;\n", k)
+            w("    %10s %f\n", "-temp", run["soiltemp"][K, I])
+            w("EQUILIBRIUM_PHASES_MODIFY %d\n", k)
+            resetCO2g = resetO2g = 0
+            if i > 1:
+                if scheme["CO2gprotocol"].lower() == "reset":
+                    CO2gmol, resetCO2g = run["CO2gmol"][K, I], 1
+                elif scheme["CO2gprotocol"].lower() == "topup" and out["soil"]["CO2g"][K, I - 1] < run["CO2gmol"][K, I]:
+                    CO2gmol, resetCO2g = out["soil"]["CO2g"][K, I - 1], 1
+                if scheme["O2gprotocol"].lower() == "reset":
+                    O2gmol, resetO2g = run["O2gmol"][K, I], 1
+                elif scheme["O2gprotocol"].lower() == "topup" and out["soil"]["O2g"][K, I - 1] < run["O2gmol"][K, I]:
+                    O2gmol, resetO2g = out["soil"]["O2g"][K, I - 1], 1
+            if resetCO2g:
+                w("-component CO2(g)\n")
+                w("    %10s %g\n", "-si", run["si_CO2g"][K, I])
+                w("    %10s %g\n", "-moles", CO2gmol)
+            if resetO2g:
+                w("-component O2(g)\n")
+                w("    %10s %g\n", "-si", run["si_O2g"][K, I])
+                w("    %10s %g\n", "-moles", O2gmol)
+            if stg["usedust"] and self.neqsolids > 0:
+                for e in self.eqsolid:
+                    fs = pt.loc[e, "feedstock"]
+                    if fs not in run.get("treatment", {}) or run["treatment"][fs][K, I] == 0:
+                        continue
+                    w("-component %s\n", pt.loc[e, "PHREEQCphase"])
+                    mol = run["moles"][e][K, I] / self.targH2O[K, I] + out["soil"][e][K, I - 1]
+                    w("    %10s %g\n", "-moles", mol)
+            if stg["useexchange"]:
+                w("USE exchange %d;\n", k)
+            if stg["usesurface"]:
+                w("USE surface %d;\n", k)
+            w("SAVE equilibrium_phases %d; ", k)
+            if stg["useexchange"]:
+                w("SAVE exchange %d; ", k)
+            if stg["usesurface"]:
+                w("SAVE surface %d; ", k)
+            w("SAVE solution %d; END\n", k)
 
     def writekinetics(self):
         ds, stg = self.ds, self.stg
@@ -1199,8 +1390,144 @@ class PhreeqcRun:
             self._w("USE kinetics %d;\n", k)
             return
         if flag == 3:
-            raise NotImplementedError("KINETICS_MODIFY (days after the first) is stage 6 of the port")
+            self._modify_kinetics()
+            return
         self._init_kinetics()
+
+    def _modify_kinetics(self):
+        """The KINETICS_MODIFY branch of writekinetics (kinflag 3)."""
+        ds, stg, scheme, out = self.ds, self.stg, self.scheme, self.out
+        run, cell = ds["run"], ds["cell"]
+        k, i = self.k, self.i
+        K, I = k - 1, i - 1
+        targ = self.targH2O[K, I]
+        soil = out.get("soil")
+        nout = k if soil is not None else 0
+        pt = ds.get("phasetable")
+        w = self._w
+        w("KINETICS_MODIFY %d %s\n", k, out["run"]["current"][i])
+        for p in self.kinphase[: self.nkinphase]:
+            w("    -component %s\n", p)
+            mol = out["run"]["M0"][p][K, I] / targ
+            w("    %14s %g\n", "-m", mol)
+            w("    %14s %g\n", "-m0", mol)
+            if "Implicit" in p:
+                w("    %14s %g \n", "-d_params", ds["parm"]["impscale"])
+            else:
+                w("    %14s %g %f %f %f %f %f %f\n", "-d_params", out["run"]["RSA0"][p][K, I], 1.0, 1.0, 1.0, targ,
+                  stg["skipSAinKINETICS"], pt.loc[p, "precipdissrat"] * run["targH2O"][K, I] * pt.loc[p, "reversible"])
+            w("    %10s %g \n", "-tol", 1e-7 if self.usemix else 1e-8)
+        if ds["ETmethod"] == "KINETICS":
+            w("    -component %s\n", "Evapotranspiration")
+            w("    %14s %s 1\n", "-namecoef", "H2O")
+            w("    %14s %g\n", "-d_params", run["cellET"][K, I] / targ)
+        if stg["includetreatments"] and cell["tillagefrac"][K] > 0:
+            tt = ds["timetable"]
+            for tr in self._treatments():
+                wtr = [j for j, t in enumerate(tt["treatment"])
+                       if tt["runindex"][j] == i and t.lower() == tr.lower() and tt["molpm2"][j] > 0]
+                if not wtr:
+                    continue
+                mol = tt["molpm2"][wtr[0]] / targ * cell["tillagefrac"][K]
+                if soil is not None and "k_" + tr in soil:
+                    mol = soil["k_" + tr][K, I - 1] + mol
+                w("    -component %s %% treatment\n", tr)
+                w("    %14s %g\n", "-m", mol)
+                w("    %14s %g\n", "-m0", mol)
+        demand = out["run"].setdefault("demand", {})
+        nrun, ncells = ds["nrun"], ds["ncells"]
+        MM = ds.get("MMuptake")
+        if stg["includeuptake"]:
+            Ndemand = run["cellcuptake"]["N"][K, I] / targ
+            if nout > 0:
+                Ndemand = Ndemand - soil["k_Ammuptake"][K, I - 1] - soil["k_Nuptake"][K, I - 1]
+            if nout > 0 and "k_Nfix" in soil:
+                Ndemand = Ndemand - soil["k_Nfix"][K, I - 1]
+            wnut = ds["nut"].index("N")
+            if ds["trnutflag"][wnut] > 0 and i > 1:
+                Ndemand = Ndemand - soil["p_Nuptake"][K, I - 1]
+                Ndemand = Ndemand - soil["p_Ammuptake"][K, I - 1]
+            Ndemand = max(0, Ndemand)
+            demand.setdefault("N", np.zeros((ncells, nrun)))[K, I] = Ndemand
+            w("    -component %suptake\n", "Amm")
+            w("    %14s %s 1\n", "-namecoef", "Amm")
+            if self.planted[I] == 0:
+                w("    %14s 0\n", "-m")
+                w("    %14s 0\n", "-m0")
+            ind = int(max(run["Nindex"][I], 1))
+            w("    %14s %g %g %g\n", "-d_params", MM["Km"][ind - 1], MM["cmin"][ind - 1],
+              Ndemand * stg["includeAmmuptake"])
+            for kk, n in enumerate(ds["nut"]):
+                if n.lower() == "n":
+                    dem = Ndemand
+                else:
+                    dem = run["cellcuptake"][n][K, I] / targ
+                    if nout > 0:
+                        dem = dem - soil[f"k_{n}uptake"][K, I - 1]
+                    if ds["trnutflag"][kk] > 0 and i > 1:
+                        dem = dem - soil[self.trnutfld[kk]][K, I - 1]
+                dem = max(0, dem)
+                demand.setdefault(n, np.zeros((ncells, nrun)))[K, I] = dem
+                w("    -component %suptake\n", n)
+                w("    %14s %s 1\n", "-namecoef", n)
+                if self.planted[I] == 0:
+                    w("    %14s 0\n", "-m")
+                    w("    %14s 0\n", "-m0")
+                ind = int(max(run[n + "index"][I], 1))
+                w("    %14s %g %g %g\n", "-d_params", MM["Km"][ind - 1], MM["cmin"][ind - 1], dem)
+        if self.decompscheme.lower() == "swat":
+            if stg["includeNkinetics"]:
+                # MATLAB tests isfield(out,'k_Nhuma') (not out.soil), so pctorgC keeps its initial value
+                if nout > 0 and "k_Nhuma" in out:
+                    scheme["pctorgC"][K, I] = (ds["pt2"]["C"]["molmass"] * cell["gSOC"][K] / cell["gSON"][K]
+                                               * (soil["k_Nhums"][K, I - 1] + soil["k_Nhuma"][K, I - 1])
+                                               / cell["gsoil"][K] * 100)
+                w("    -component %s\n", "Denitrification")
+                if self.schemeratesfile.lower() == "swatratesphases2":
+                    w("    %14s %f %f %f %f\n", "-d_params", scheme["void"][K, I], 1.4,
+                      cell["gSOC"][K] / cell["gsoil"][K] * 100)
+                else:
+                    w("    %14s %f %f %f %f\n", "-d_params", scheme["sut"][K, I], scheme["sdnco"], scheme["cdn"],
+                      scheme["pctorgC"][K, I])
+                w("    -component %s\n", "Nitrification")
+                w("    %14s %f %f\n", "-d_params", scheme["etaSW"][K, I], scheme["etamidz"][K])
+                if stg["includeuptake"]:
+                    w("    -component %s\n", "Nfix")
+                    if self.planted[I] == 0:
+                        w("    %14s 0\n", "-m")
+                        w("    %14s 0\n", "-m0")
+                    w("    %14s %f %f %f\n", "-d_params", run["legstage"][I], Ndemand,
+                      run["targH2O"][K, I] / cell["FC"][K] / 0.85)
+            if stg["includehumus"]:
+                w("    -component %s\n", "Nhuma")
+                w("    %14s %f %f\n", "-d_params", scheme["sut"][K, I], scheme["kNhumaday"])
+            if (stg["includeresidues"] and cell["tillagefrac"][K] > 0) or stg["includerootresidues"]:
+                mol = scheme["resCgfrac"] / 12.01 * (run["residue"][K, I] + run["rootresidue"][K, I]) / targ
+                w("    -component %s\n", "Residue")
+                if mol > 0:
+                    if nout > 0:
+                        mol = mol + soil["k_Residue"][K, I - 1]
+                    w("    %10s %g\n", "-m", mol)
+                w("    %10s %f %f %f %f\n", "-d_params", scheme["sut"][K, I], scheme["resCNgrat"], scheme["resCPgrat"],
+                  scheme["kresday"])
+            if stg["includemanure"] and cell["tillagefrac"][K] > 0:
+                mol = scheme["resCgfrac"] / 12.01 * run["manure"][K, I] / targ
+                w("    -component %s\n", "Manurefresh")
+                if mol > 0:
+                    if nout > 0:
+                        mol = mol + soil["k_Manurefresh"][K, I - 1]
+                    w("    %10s %g\n", "-m", mol)
+                w("    %10s %f %f %f %f\n", "-d_params", scheme["sut"][K, I], scheme["resCNgrat"], scheme["resCPgrat"],
+                  scheme["kmanday"])
+        elif stg["includeNkinetics"]:
+            w("Nitrification\n")
+            w("    %10s %g \n", "-d_params ", run["nitrifscl"][K, I])
+            w("    %10s %g \n", "-tol", stg["tol"])
+            w("FreeBioNfix\n")
+            w("    %10s %g %g \n", "-d_params ", cell["CFannET"][K], targ)
+            w("    %10s %g \n", "-tol", stg["tol"])
+        w("INCREMENTAL_REACTIONS true\n")
+        w("USE kinetics %d;\n", k)
 
     def _init_kinetics(self):
         ds, stg, scheme, out = self.ds, self.stg, self.scheme, self.out
