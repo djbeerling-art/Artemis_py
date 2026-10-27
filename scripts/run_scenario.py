@@ -5,7 +5,8 @@ Usage: python scripts/run_scenario.py NAME WORKDIR [NDAYS [OPTIONS]]
 NAME is a key of ``artemis_p.ef2.SCRIPTS`` (e.g. rCcomp). NDAYS defaults to
 the whole run. OPTIONS are PhreeqcRun options as for run_rbcomp.py, e.g.
 ``engine=iphreeqc,cellworkers=4,printoutput=0``; ``fixes=all+native_rsa_weighting``
-sets ``ds['fixes']`` (names joined by +). The output structure is
+sets ``ds['fixes']`` (names joined by +); ``noappend=PATH`` restarts from the port's own
+spin-up dump (PATH.dmp, or PATH.mat beside it) instead of the authors'. The output structure is
 pickled to WORKDIR/out.pkl and the data structure to WORKDIR/ds.pkl.
 """
 
@@ -51,6 +52,9 @@ def main(name, work, ndays=None, options=None):
     print(f"{ndays} days in {time.time() - t0:.0f} s")
     if ndays == r.ilast - r.istart + 1:
         r.finish()
+    elif r.engine is not None:  # a partial run still leaves the dump a restart reads
+        r.engine.write_dump(r.fname + ".dmp")
+    print(f"dump: {r.fname}.dmp")
     pickle.dump(r.out, open(work / "out.pkl", "wb"))
     pickle.dump(r.ds, open(work / "ds.pkl", "wb"))
 

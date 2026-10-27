@@ -37,7 +37,7 @@ FLAGS = {
     "noNkinetics": {"includeNkinetics": 0}, "notreatments": {"includetreatments": 0},
 }
 # getphreeqcrun arguments that take a value and map straight to an option
-VALUED = {"runname", "runlab", "nyears", "ndays", "fixCO2gmol", "fixO2gmol"}
+VALUED = {"runname", "runlab", "nyears", "ndays", "fixCO2gmol", "fixO2gmol", "noappend", "restart", "restartfile"}
 
 
 def run_options(ds, runarg):

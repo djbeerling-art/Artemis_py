@@ -162,6 +162,10 @@ def _script(fsname="Blueridge", EXCHmethod="comp", tropt="", runcat="main", apop
     return args + list(extra)
 
 
+# the authors' $SCRATCH, where the restart scripts found their spin-up runs;
+# scripts/run_scenario.py points restarts at the port's own spin-up runs instead
+SCRATCH = "/mnt/parscratch/users/bo1llt/"
+
 # runname of the published input: (EFrunsettings2 arguments, extra setupdatastruc arguments,
 # extra getphreeqcrun arguments), from the r*script.m files
 SCRIPTS = {
@@ -208,6 +212,17 @@ SCRIPTS = {
                   ["runname", "rspinmean", "runlab", "Spinup mean forcings", "nodust", "notreatments"]),
     "rspinstd": (None, ["parm=t1", "2000-Jan-14", "parm=t2", "2015-Dec-10", "HYDROmethod", "Richards"],
                  ["runname", "rspinstd", "runlab", "Spinup std", "nodust", "notreatments"]),
+    # 2015 with fertiliser, restarted from a spin-up that ended in 2014
+    "rspinstdf": (None, ["parm=t1", "2015-Jan-01", "parm=t2", "2015-Dec-10", "HYDROmethod", "Richards"],
+                  ["runname", "rspinstdf", "runlab", "Spinup std+fert", "nodust",
+                   "noappend", SCRATCH + "/EF2//rspinstd_nodust_Jan2000_Dec2014_24-May-2026.mat"]),
+    # tuning runs restarted from the spin-ups (getphreeqcrun's noappend)
+    **{name: (_script(before=["Richards"], runcat="tuning", RSAscale=2, impscale=5),
+              ["runlab", lab, "runname", name], ["noappend", SCRATCH + spin])
+       for name, lab, spin in (
+           ("rwss", "With std spinup", "EF2//rspinstd_nodust_Jan2000_Dec2015_20-Jun-2026.mat"),
+           ("rwms", "With mean spinup", "/EF2//rspinmean_nodust_Jan2000_Dec2015_20-Jun-2026.mat"),
+           ("rwssf", "With stdf spinup", "/EF2//rspinstdf_nodust_Jan2015_Dec2015_20-Jun-2026.mat"))},
 }
 
 # parm values that rbcomp_settings adds for the rBcomp run itself
@@ -280,7 +295,7 @@ _SPINFILES = [f for f in EF2_FILES if "feedstock" not in f and "_obs_" not in f]
 _SPINFILES = [f.replace("EF_maize_B0_timetable.csv", "EF_maize_B0_timetable_forspinup.csv")
               .replace("EF_CLM5_2015-2070", "EF_CLM5_2000-2014") for f in _SPINFILES]
 USEFILES = {
-    "rspinmean": _SPINFILES, "rspinstd": _SPINFILES,
+    "rspinmean": _SPINFILES, "rspinstd": _SPINFILES, "rspinstdf": _SPINFILES,
     "rBdynex": [f.replace("/secondary_phases.csv", "/secondary_phases3.csv") for f in EF2_FILES],
 }
 

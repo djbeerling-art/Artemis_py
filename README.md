@@ -82,12 +82,15 @@ Separate sites or scenarios can also run in parallel.
   executable; end-of-run totals within 1e-7 with `engine="iphreeqc"`)
 - [x] End-of-run totals and comparison with observations
 - [x] Bug fixes as switches (`artemis_p/fixes.py`)
-- [x] Day-1 input of the other published EF2 scenarios: 33 of the 35 run
+- [x] Day-1 input of the other published EF2 scenarios: 36 of the 37 run
   scripts that have a published `.in_init` give it byte for byte
   (`artemis_p/ef2.py`, `scripts/check_day1.py`, `tests/test_scenarios.py`),
   including the controls, forsterite and wollastonite runs, the 2015-2070 long
-  runs and the spin-ups. Only rBcomp is checked end to end.
-- [ ] Not ported: bucket hydrology (rBbucket), restarts from a spin-up `.mat`
-  (`noappend`: rspinstdf, rwms, rwss, rwssf; their spin-up states were not
-  published), bottom-up mixing, SWAT snow, potential ET, soil respiration,
-  drains, `getlayerfluxes`/`getnetCDRfluxes`, plotting
+  runs, the spin-ups and the runs restarted from them. Only rBcomp is checked
+  end to end.
+- [x] Restarts from a spin-up (`noappend`: rspinstdf, rwms, rwss, rwssf). The
+  authors' spin-up states were not published, so `scripts/run_scenario.py`
+  takes `noappend=PATH` to restart from the port's own spin-up dump.
+- [x] Layer fluxes and net CDR (`artemis_p/cdr.py`)
+- [ ] Not ported: bucket hydrology (rBbucket; not needed), bottom-up mixing,
+  SWAT snow, potential ET, soil respiration, drains, plotting

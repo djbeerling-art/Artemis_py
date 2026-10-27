@@ -11,7 +11,7 @@ from test_parallel import needs_data
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-NOT_PORTED = {"rBbucket": "bucket hydrology"}
+NOT_PORTED = {"rBbucket": "bucket hydrology (not needed: David, 27 October 2026)"}
 
 
 @needs_data

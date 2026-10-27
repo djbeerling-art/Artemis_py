@@ -135,6 +135,7 @@ class Instance:
 _INCLUDE = re.compile(r"^INCLUDE\$\s+(\S+)[ \t]*$", re.M)
 _DUMPBLOCK = re.compile(r"^DUMP\n(?:\s+-[^\n]*\n)*END\n?", re.M)
 _SELFILE = re.compile(r"^SELECTED_OUTPUT[^\n]*\n\s+-file (\S+)\n", re.M)
+_RESTORE = re.compile(r"^INCLUDE\$\s+\S+\.dmp[ \t]*\n", re.M)
 _RAW = re.compile(r"^\w+_RAW\s+(\d+)", re.M)
 
 
@@ -240,7 +241,10 @@ class Engine:
         head, body = (text[:ititle.start()], text[ititle.start():]) if ititle else (text, "")
         if self.includes is not None and self.dumpfile:
             head = head.replace(f"INCLUDE$ {self.dumpfile}\n", "")
-        head = self._head(_absolute_includes(head, base))
+        # a restart's dump is read once, by the main instance, ahead of the day's simulations
+        restore = "".join(_RESTORE.findall(head))
+        head = _RESTORE.sub("", head)
+        head = self._head(_absolute_includes(head, base)) + _absolute_includes(restore, base)
         self.dumpfile = dmp.group(1) if dmp else self.dumpfile
         body = _absolute_includes(body, base)
         parts = _split_body(body) if self.workers > 1 else None

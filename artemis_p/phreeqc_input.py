@@ -270,10 +270,28 @@ class PhreeqcRun:
                 self.out["metadata"]["runlab"] = v
             elif k in ("name",):
                 self.fname = v
+            elif k in ("noappend", "restart", "restartfile"):
+                # restart from a dump without the previous results (spin-up runs)
+                self.restart, self.append = 1, 0
+                self.restartdump = self._restartdump(v)
+            elif k == "append":
+                raise NotImplementedError("getphreeqcrun 'append' (reloading the previous run's results)")
             elif hasattr(self, k):
                 setattr(self, k, v)
             else:
                 raise ValueError(f"unrecognised getphreeqcrun option {k!r}")
+
+    @staticmethod
+    def _restartdump(name):
+        """The dump file of getphreeqcrun's restart argument: a .dmp, a .mat beside it, or no extension."""
+        name = str(name)
+        if name.endswith(".dmp"):
+            return name
+        if name.endswith(".mat"):
+            return name[:-4] + ".dmp"
+        if "." not in Path(name).name:
+            return name + ".dmp"
+        raise ValueError(f"Unrecognised restart filename extension: {name}")
 
     def _setup(self):
         ds, stg, scheme, out = self.ds, self.stg, self.scheme, self.out
@@ -340,13 +358,18 @@ class PhreeqcRun:
         out["metadata"]["H2Oscale"] = self.cellH2O * 0 + 1 if stg["usewater"] else self.cellH2O
         self.initw = 1
         self.iter = 0
-        self.init = 1
+        self.init = 0 if self.restart else 1
+        if self.restart:
+            out["metadata"]["restartdump"] = self.restartdump
         out["run"]["current"] = {}
         out["_nrun"], out["_ncells"] = ds["nrun"], ds["ncells"]
         if "grams" in run:
             out["run"]["grams"] = {k: np.array(v, dtype=float) for k, v in run["grams"].items()}
         for f in ("errdesc", "nwarnings", "stopwatch"):
             out["run"][f] = {}
+        if self.restart and not self.append:  # the restart day starts the kinetics afresh
+            col = self.kinflag[:, self.istart - 1]
+            col[col > 1] = 1
 
     def _uncharged_surface_sites(self):
         stg, cell = self.stg, self.ds["cell"]
