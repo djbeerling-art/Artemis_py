@@ -86,3 +86,39 @@ def test_phase_table():
         ours = [t.loc[rows[i], c] for i in keep]
         assert matref.differences(ours, [ref[c][i] for i in keep], c) == []
     assert (t.loc[list(implicit), "PHREEQCphasetype"] == "ignore").all()
+
+
+def test_initial_chemistry():
+    from artemis_p.chemistry import read_initial_chemistry
+    from artemis_p.layers import read_init_layer_data
+
+    data = Path(os.environ["ARTEMIS"]) / "examples" / "EF_data"
+    ds = read_init_layer_data({"parm": {}}, data / "initlayers_Flanagan_EF_0-183cm.csv")
+    ds = read_initial_chemistry(ds, data / "rainwater_Champaign_NTN_2021_initialChemistry.csv")
+    ref = ref_ds()
+    assert matref.differences(ds["init"], ref["init"], "init") == []
+    assert matref.differences(ds["influent"], ref["influent"], "influent") == []
+    assert matref.differences(ds["layer"]["soilsoln"], ref["layer"]["soilsoln"], "soilsoln") == []
+
+
+def test_climate_forcing():
+    from artemis_p.forcing import read_timeseries, set_run_time_arrays
+    from artemis_p.layers import read_init_layer_data
+
+    data = Path(os.environ["ARTEMIS"]) / "examples" / "EF_data"
+    ds = read_init_layer_data({"parm": {}}, data / "initlayers_Flanagan_EF_0-183cm.csv")
+    ds = set_run_time_arrays(ds, "2015-01-01", "2020-12-31")
+    ref = ref_ds()
+    run, rrun = ds["run"], ref["run"]
+    assert ds["nrun"] == ref["nrun"]
+    for k in ("year", "month", "day", "decyear", "doy", "exptday"):
+        assert matref.differences(run[k], rrun[k], k) == []
+    assert (run["tt"] == rrun["tt"]).all()
+    for f in ("soiltemp", "airtemp", "soilresp", "CO2atm", "snow", "infil_ET"):
+        ds = read_timeseries(ds, data / f"EF_CLM5_2015-2070_timeseries_{f}.csv")
+    forced = ["soiltemp", "airtemp", "soilresp", "hetresp", "rootresp", "CO2atm",
+              "snowfall", "snowmelt", "snowpack", "sublimation", "ET", "infil"]
+    for k in forced:
+        assert matref.differences(run[k], rrun[k], k, rtol=1e-12, atol=1e-12) == [], k
+        assert run["units"][k] == rrun["units"][k]
+        assert Path(ds["provided"][k]).name == Path(ref["provided"][k]).name

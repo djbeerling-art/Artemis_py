@@ -34,7 +34,7 @@ Plotting code (`getfig`, `show*`, figure scripts) is not ported.
 
 1. **Infrastructure (done).** PHREEQC runner, `.sel` reader and comparison,
    `.mat` loader, rBcomp day-1 regression test.
-2. **Input reading (~2,000 lines; in progress: `readcsvdata`, `getperiodictable`, `readtimetable`, `getdecyear`, `getscreenedtable`, `setmodelspecies`, `readinitlayerdata`, `getphasetable`, `checkphasetype` (table defaults) done).** `readinputfiles`, `readcsvdata`,
+2. **Input reading (~2,000 lines; in progress: `readcsvdata`, `getperiodictable`, `readtimetable`, `getdecyear`, `getscreenedtable`, `setmodelspecies`, `readinitlayerdata`, `getphasetable`, `checkphasetype` (table defaults), initial chemistry, run calendar and climate time series done; `readobsdata` (validation data only) still to do).** `readinputfiles`, `readcsvdata`,
    `readtimetable`, `readinitlayerdata`, `readobsdata`, `getscreenedtable`,
    `getphasetable`, `getperiodictable`, `setmodelspecies`, `getdecyear`.
    Checked against `ds.timetable`, `ds.layer`, `ds.phasetable` in the `.mat`.
@@ -89,6 +89,21 @@ flagged here to fix once the port is verified.
   (`SAmethod='traditional'`, used by the published runs) computes
   `G.*1000` correctly at line 225, so the published runs look unaffected.
   To be confirmed when `markPSDinit` is ported.
+
+- **Measured soil pH discarded (`readinputfiles.m` `readinitialchemistry`).**
+  `readinitlayerdata` stores the initlayers pH profile (6.27 to 7.9 for EF) in
+  `ds.layer.soilsoln.msp.pH`. `readinitialchemistry` then replaces the whole
+  `ds.layer.soilsoln` struct with the rainwater composition. With no
+  porewater column it also deletes the rainwater pH. The soil cells therefore
+  start from rainwater equilibrated with soil CO2 (`pH 5.5 CO2(g) ...` in the
+  published `.in_init`), and the measured profile is never used. This may be
+  intended, but the code's comments suggest not. Worth asking the authors.
+- **Depth units in time series (`checktsdepths`).** The test
+  `numel(contains(ucell,'cm'))` is always non-zero, so depths given in metres
+  would never be converted to cm. All EF files use cm.
+- **Stale index (`settimeseries`).** For depth-resolved files with per-month
+  units it reads `ds.run.units.(var{i})` with an `i` left over from an
+  enclosing loop. No published input takes this path.
 
 ## MATLAB call graph (rBcomp entry points)
 
