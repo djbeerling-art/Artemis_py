@@ -145,7 +145,13 @@ def _set_feedstock(ds):
     if "baskg" in tt and "dosekg" not in tt:
         tt["dosekg"] = np.array(tt["baskg"], float)
     if "dosekg" not in tt and "dosage" in tt:
-        raise NotImplementedError("dosekg from dosage in setfeedstock is not ported yet")
+        # every entry with recognised units, not just feedstocks (as in MATLAB)
+        print("(setupdatastruc/setfeedstock) creating dosekg from dosage")
+        dosage = np.asarray(tt["dosage"], float)
+        units = [str(u).lower() for u in tt["doseunits"]]
+        scale = {"kg/ha": 1e-4, "kg/m2": 1.0, "t/ha": 0.1}
+        tt["dosekg"] = np.array([dosage[j] * scale[u] if u in scale else dosage[j] * 0
+                                 for j, u in enumerate(units)])
     tt["dosekg"] = np.where(np.isnan(tt["dosekg"]), 0, tt["dosekg"])
     run["treated"] = np.zeros(ds["nrun"])
     if "treatment" in tt:
@@ -163,8 +169,15 @@ def _set_feedstock(ds):
     if ptype.str.contains("kin").any():
         names = set(ds["feedstocktable"]["feedstock"]) if "feedstocktable" in ds else set()
         if any(t in names for t in tt.get("treatment", [])):
-            raise NotImplementedError("markPSDinit PSD tracking is not ported yet")
-        ds["mark"] = {"binmethod": "SA-mean", "binspec": 10, "wholebasaltflag": 0}
+            # the PSD structures need Mark Lomas's routines (PSD_range_2_P, ...), which are not
+            # in the archive; setupdatastruc catches the error and leaves ds.mark unset. Only
+            # SAmethod 'discrete' (updateRSA) uses them.
+            if str(ds.get("SAmethod", "")).lower() == "discrete":
+                raise NotImplementedError("markPSDinit PSD tracking (SAmethod 'discrete') is not ported yet")
+            print("****Unable to set up Lomas PSD-tracking entities****")
+            print("****Avoid SAmethod=\"discrete\"****")
+        else:
+            ds["mark"] = {"binmethod": "SA-mean", "binspec": 10, "wholebasaltflag": 0}
 
 
 def _set_crop_from_timetable(ds):

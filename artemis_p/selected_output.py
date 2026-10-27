@@ -48,7 +48,7 @@ def compare_sel(test, ref, rtol=1e-6, atol=1e-12):
             continue
         x, y = a[c].to_numpy(float), b[c].to_numpy(float)
         d = np.abs(x - y)
-        rel = d / np.maximum(np.abs(y), atol)
+        rel = d / np.fmax(np.abs(y), atol)
         nbad = int((d > atol + rtol * np.abs(y)).sum())
         rows.append((c, d.max(), rel.max(), nbad))
     return pd.DataFrame(rows, columns=["column", "max_abs", "max_rel", "n_outside"]).set_index("column")

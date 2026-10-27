@@ -90,22 +90,75 @@ def screen_table(t, ds, idfld="expID", keepnull=False):
 
 
 def read_timetable(ds, fname, baskg=None):
-    """readtimetable.m for the options used by the published runs.
-
-    Not yet ported: ``repeattimetable``, ``ceasefeedstockyear`` and
-    ``nofeedstockyears`` (long runs), which raise NotImplementedError.
-    """
+    """readtimetable.m, including the long-run options ``repeattimetable``,
+    ``ceasefeedstockyear`` and ``nofeedstockyears`` from ``ds['parm']``."""
     parm = ds.get("parm", {})
-    for opt in ("repeattimetable", "ceasefeedstockyear", "nofeedstockyears"):
-        if opt in parm:
-            raise NotImplementedError(f"readtimetable option {opt} is not ported yet")
     t = screen_table(read_table(fname), ds)
     if "inputfiles" in ds:
         ds["inputfiles"].append(str(fname))
-    ds["timetable"] = get_decyear(dict(t), gregorian=fixed(ds, "leap_year"))
-    if baskg is not None and "baskg" in ds["timetable"]:
-        b = ds["timetable"]["baskg"]
+    gregorian = fixed(ds, "leap_year")
+    tt = ds["timetable"] = get_decyear(dict(t), gregorian=gregorian)
+    if baskg is not None and "baskg" in tt:
+        b = tt["baskg"]
         b[b > 0] = baskg
+    if "repeattimetable" in parm:
+        tt = ds["timetable"] = _repeat_timetable(tt, parm, gregorian)
+    if "ceasefeedstockyear" in parm:
+        fs = (tt["decyear"] > parm["ceasefeedstockyear"]) & _is_feedstock(tt)
+        if fs.any():
+            print(f"Reducing feedstock dosages to zero for {fs.sum()} treatments starting from "
+                  f"{tt['decyear'][fs][0]:g}")
+            _no_feedstock(tt, fs)
+    elif "nofeedstockyears" in parm:
+        bad = np.isin(tt["year"], np.atleast_1d(parm["nofeedstockyears"])) & _is_feedstock(tt)
+        print(f"(readtimetable) Reduced feedstock dosages to zero for {bad.sum()} entries")
+        _no_feedstock(tt, bad)
     if "nrun" not in ds:
         raise NotImplementedError("readtimetable without ds['nrun'] (julian dates) is not ported yet")
     return ds
+
+
+def _is_feedstock(tt):
+    return np.array([str(f).lower() == "feedstock" for f in tt["doseform"]])
+
+
+def _no_feedstock(tt, w):
+    for i in np.flatnonzero(w):
+        tt["doseform"][i] = ""
+    tt["dose"][w] = 0
+
+
+def _repeat_timetable(tt, parm, gregorian):
+    """Extend the timetable by repeating the entries from ``repeattimetable[0]`` (decimal
+    year; -1 for the last calendar year) until ``repeattimetable[1]``."""
+    rep = [float(v) for v in parm["repeattimetable"]]
+    last = tt["decyear"][-1]
+    if rep[0] < 0:
+        rep[0] = parm["repeattimetable"][0] = tt["year"][-1]
+    wrep = np.flatnonzero(tt["decyear"] >= rep[0])
+    if not len(wrep):
+        print(f"Unable to extend timetable to {rep[1]:g} because no entries found after {rep[0]:g}")
+        return tt
+    nrepyears = len(np.unique(tt["year"][wrep]))
+    nyr = int(np.ceil(rep[1] - last))
+    # MATLAB round: halves away from zero
+    ncycles = int(np.floor(nyr / nrepyears + 0.5))
+    print(f"Last timetable entry: {last:g} ({len(tt['decyear'])}) Adding {nyr} years ({ncycles:g} rep cycles)")
+    out = {}
+    for k, v in tt.items():
+        if isinstance(v, dict):
+            out[k] = v
+        elif isinstance(v, np.ndarray):
+            out[k] = np.concatenate([v] + [v[wrep]] * ncycles)
+        else:
+            out[k] = list(v) + [v[i] for i in wrep] * ncycles
+    n = len(tt["decyear"])
+    year = np.asarray(out["year"], float)
+    for j in range(1, ncycles + 1):
+        year[n + (j - 1) * len(wrep):n + j * len(wrep)] += j * nrepyears
+    out["year"] = year.astype(np.asarray(tt["year"]).dtype)
+    # the decimal years are recomputed, not copied, so that leap years count
+    out = get_decyear(out, gregorian=gregorian)
+    print(f"Extended timetable to {out['decyear'][-1]:g} (now {len(out['decyear'])} entries) using {len(wrep)} "
+          f"entries from {tt['decyear'][wrep[0]]:g} to {tt['decyear'][wrep[-1]]:g}")
+    return out

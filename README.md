@@ -82,6 +82,12 @@ Separate sites or scenarios can also run in parallel.
   executable; end-of-run totals within 1e-7 with `engine="iphreeqc"`)
 - [x] End-of-run totals and comparison with observations
 - [x] Bug fixes as switches (`artemis_p/fixes.py`)
-- [ ] Other published scenarios (only rBcomp is checked end to end)
-- [ ] Not ported: bucket hydrology, bottom-up mixing, SWAT snow, potential
-  ET, soil respiration, drains, `getlayerfluxes`/`getnetCDRfluxes`, plotting
+- [x] Day-1 input of the other published EF2 scenarios: 33 of the 35 run
+  scripts that have a published `.in_init` give it byte for byte
+  (`artemis_p/ef2.py`, `scripts/check_day1.py`, `tests/test_scenarios.py`),
+  including the controls, forsterite and wollastonite runs, the 2015-2070 long
+  runs and the spin-ups. Only rBcomp is checked end to end.
+- [ ] Not ported: bucket hydrology (rBbucket), restarts from a spin-up `.mat`
+  (`noappend`: rspinstdf, rwms, rwss, rwssf; their spin-up states were not
+  published), bottom-up mixing, SWAT snow, potential ET, soil respiration,
+  drains, `getlayerfluxes`/`getnetCDRfluxes`, plotting

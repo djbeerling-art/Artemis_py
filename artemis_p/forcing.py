@@ -30,11 +30,19 @@ def decyear(dt):
     return dt.year + (dt - start).total_seconds() / 86400 / _days_in_year(dt.year)
 
 
+def _parse_date(s):
+    """The date strings MATLAB's datetime reads in the run scripts: 2015-01-01 or 2000-Jan-14."""
+    try:
+        return date.fromisoformat(s)
+    except ValueError:
+        return datetime.strptime(s, "%Y-%b-%d").date()
+
+
 def set_run_time_arrays(ds, t1, t2):
     """setruntimearrays: one entry per day from ``t1`` to ``t2`` inclusive (ISO date strings)."""
     datastep = ds.setdefault("datastep", 1)
     ds.setdefault("rollstep", datastep)
-    d1, d2 = date.fromisoformat(t1), date.fromisoformat(t2)
+    d1, d2 = _parse_date(t1), _parse_date(t2)
     tt = [datetime(d1.year, d1.month, d1.day) + timedelta(days=i)
           for i in range(0, (d2 - d1).days + 1, datastep)]
     run = ds.setdefault("run", {})
@@ -96,8 +104,8 @@ def _read(path):
 
 def read_timeseries(ds, fname, keepmonthly=False):
     """readtimeseries for files with ``year,month[,day]`` columns."""
-    if ds.get("parm", {}).get("usemeanforcings"):
-        raise NotImplementedError("usemeanforcings is not ported yet")
+    # spin-ups: each series is replaced by its mean over the run (MATLAB mean, so NaN propagates)
+    usemean = ds.get("parm", {}).get("usemeanforcings", 0)
     raw_units, ucell, names, cols = _read(fname)
     run = ds["run"]
     run_units = run.setdefault("units", {})
@@ -139,6 +147,8 @@ def read_timeseries(ds, fname, keepmonthly=False):
         val = _interp2_rows(tdec, depth, array, run["decyear"], ds["layer"]["middepth"]) / fscl
         for j in range(ds["nlayers"]):
             _fill_ends(val[j], ds["nrun"])
+        if usemean:
+            val = val * 0 + val.mean(axis=1, keepdims=True)
         run[fld] = val
         provided[fld] = str(fname)
     else:
@@ -163,6 +173,8 @@ def read_timeseries(ds, fname, keepmonthly=False):
             run[n] = _fill_ends(val, ds["nrun"])
             if n != "juldate":
                 provided[n] = str(fname)
+            if usemean:
+                run[n] = run[n] * 0 + run[n].mean()
     ds.setdefault("inputfiles", []).append(str(fname))
     return ds
 

@@ -249,10 +249,10 @@ def pedotransfer(ds, sandpct=None, claypct=None, ptran="Cosby5", include_om=True
     if "fSOM" in cell and include_om:
         pcbeta, pcalpha, zsapric = 0.139, 0.5, 50
         zsaprat = cell["middepth"] / zsapric
-        om_watsat = np.maximum(0.93 - 0.1 * zsaprat, 0.83)
-        om_b = np.minimum(2.7 + 9.3 * zsaprat, 12.0)
-        om_sucsat = np.minimum(10.3 - 0.2 * zsaprat, 10.1)
-        om_hksat = np.maximum(0.28 - 0.2799 * zsaprat, xksat)
+        om_watsat = np.fmax(0.93 - 0.1 * zsaprat, 0.83)
+        om_b = np.fmin(2.7 + 9.3 * zsaprat, 12.0)
+        om_sucsat = np.fmin(10.3 - 0.2 * zsaprat, 10.1)
+        om_hksat = np.fmax(0.28 - 0.2799 * zsaprat, xksat)
         perc_frac = 0.0
         om_frac = cell["fSOM"] * cell["gsoil"] / cell["vsoil"] / 130  # volumetric OM fraction
         if np.all(om_frac > pcalpha):

@@ -28,7 +28,7 @@ def set_soil_texture(ds):
         parm["tillagedepth"] = parm.get("basalt_depth", np.asarray(cell["bottomdepth"]).ravel()[0])
     parm.setdefault("units", {})["tillagedepth"] = "cm"
     top = np.asarray(cell["topdepth"], float)
-    cell["tillagefrac"] = np.maximum(np.minimum(parm["tillagedepth"] - top, cell["thickness"]) / parm["tillagedepth"], 0)
+    cell["tillagefrac"] = np.fmax(np.fmin(parm["tillagedepth"] - top, cell["thickness"]) / parm["tillagedepth"], 0)
     cell.setdefault("label", {})["tillagefrac"] = "Fraction of tillage depth in each cell"
     return ds
 
@@ -104,7 +104,7 @@ def cec_sorb(ds, extractable_fe=None):
             cell["cecsum"] = cecsum / cec * 100
             units["cecsum"], label["cecsum"] = "percent", "Sum contributions to CEC"
             if np.any(cecsum < cec) and not exdata:
-                cell["exchange"][exsp] = np.maximum(1e-13, cec - cecsum) / cec * cell["X"] / exchg
+                cell["exchange"][exsp] = np.fmax(1e-13, cec - cecsum) / cec * cell["X"] / exchg
     elif "exchangeable" in cell or "extractiondata" in parm or "basesat" in cell:
         raise NotImplementedError("CECsorb without a CEC profile is not ported yet")
     elif "CEC" in parm:

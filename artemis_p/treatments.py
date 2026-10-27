@@ -70,8 +70,22 @@ def get_fert(treatment, units="g/m2land", convmassarea=False, verbose=False):
             units2gpm2 = units2gpm2 / 30.9736 * molmass
             convunits = convunits.replace("P", treatment)
     else:
-        # MATLAB treats anything else as a chemical formula (molweight/parse_formula)
-        raise NotImplementedError(f"getfert: treatment {treatment} given as a chemical formula is not ported yet")
+        # anything else is taken as a chemical formula. MATLAB uses StoichTools molweight; the
+        # molar masses here come from ARTEMIS's periodictable.csv, which may differ from
+        # StoichTools' in the last digits (not checked: no published run doses one in its first days)
+        from .formula import parse_formula
+        from .periodictable import get_periodic_table
+
+        mm = get_periodic_table()[1]
+        spp = parse_formula(treatment)
+        longname = formula = treatment
+        molmass = sum(float(mm[el]["molmass"]) * n for el, n in spp.items())
+        for el, n in spp.items():
+            if el in units:
+                units2gpm2 = units2gpm2 / float(mm[el]["molmass"]) / n * molmass
+                convunits = convunits.replace(el, treatment)
+                break
+        treatment = treatment + "_trmt"
     if verbose:
         print(f"(getfert) Treatment {treatment} ({longname}) molar mass {molmass:g} g/mol, formula {formula}")
         print(f"(getfert) {treatment} units {units} (= {units2gpm2:g} {convunits})")

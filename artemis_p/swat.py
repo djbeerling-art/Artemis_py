@@ -43,7 +43,7 @@ def day_swat(ds, zrmxfrPHU=0.4, bwater_default=10, ClKmassrat=0.3):
         label["zroot"], units["zroot"] = "Max rooting depth", "cm"
         label["dzroot"], units["dzroot"] = "Max rooting depth increment", "cm"
     elif "zrootmx" in parm:
-        run["zroot"] = np.minimum(parm["zrootmx"], run["zroot"])
+        run["zroot"] = np.fmin(parm["zrootmx"], run["zroot"])
     if "rootmass" not in run:
         run["rootmass"] = zero.copy()
         label["rootmass"], units["rootmass"] = "Root mass", massunits
@@ -92,7 +92,7 @@ def day_swat(ds, zrmxfrPHU=0.4, bwater_default=10, ClKmassrat=0.3):
     _growth_curves(ds, wr, wrun, wswat, zero, incunits, sclunits)
     parm.setdefault("bwater", bwater_default)
     bwater = parm["bwater"]
-    cover = np.minimum(run["LAI"], 1)
+    cover = np.fmin(run["LAI"], 1)
     bare = 1 - cover
     run["cover"] = cover
     _char_depth(ds, cover, bwater)
@@ -109,8 +109,29 @@ def day_swat(ds, zrmxfrPHU=0.4, bwater_default=10, ClKmassrat=0.3):
     if len(wr):
         _nut_uptake(ds, stoichN, wN, zero, uzero)
     if parm["usemeanforcings"] == 1:
-        raise NotImplementedError("usemeanforcings is not ported yet")
+        _use_means(ds["run"], zero)
     return ds
+
+
+def _mean_row(x):
+    """MATLAB x.*0+mean(x,2): every day set to the run mean (NaN propagates)."""
+    x = np.asarray(x, float)
+    return x * 0 + x.mean(axis=-1, keepdims=True)
+
+
+def _use_means(run, zero):
+    """Spin-ups (usemeanforcings): mean LAI, masses, root depth and uptake."""
+    print("daySWAT7 Using mean values for LAI, masses, root depth")
+    for f in ("LAI", "totmass", "rootmass", "zroot"):
+        run[f] = zero + np.asarray(run[f], float).mean(axis=-1, keepdims=True)
+    run["plant"] = (run["totmass"] > 0).astype(float)
+    run["cellup"] = _mean_row(run["cellup"])
+    for f, v in run["uptake"].items():
+        if isinstance(v, np.ndarray):
+            run["uptake"][f] = _mean_row(v)
+    for el in list(run["totuptake"]):
+        for grp in ("totuptake", "totcuptake", "cellcuptake", "celluptake"):
+            run[grp][el] = _mean_row(run[grp][el])
 
 
 def _canopy_interception(ds):
@@ -219,8 +240,8 @@ def _growth_curves(ds, wr, wrun, wswat, zero, incunits, sclunits):
                 raise ValueError("fallow day inside a growing season (MATLAB would fail indexing row 0)")
             run["PHU"][s] = np.cumsum(airtemp[s] * grow[s] * plant[s])
             run["frPHU"][s] = run["PHU"][s] / run["PHU"][ihar] * sw["frPHUhar"][rows]
-            run["zroot"][s] = np.maximum(run["sowdepth"][isow],
-                                         np.minimum(1, run["frPHU"][s] / parm["zrmxfrPHU"]) * zrootmx[s])
+            run["zroot"][s] = np.fmax(run["sowdepth"][isow],
+                                         np.fmin(1, run["frPHU"][s] / parm["zrmxfrPHU"]) * zrootmx[s])
             run["totmass"][s] = peaktot[ipeak] if ipeak >= 0 else _bad_index("peaktot")
             run["rootmass"][s] = run["peakroot"][ipeak]
             gf = (run["frPHU"][s] >= PHUsen[s]) & (run["frPHU"][s] <= 1.0)
@@ -288,8 +309,8 @@ def _layer_et(ds, wr, cover, bare, bwater):
     with np.errstate(divide="ignore", invalid="ignore"):
         for i in range(ds["ncells"]):
             up["fracET"][i] = cell["evapfrac"][i] * bare
-            bottom = np.minimum(run["zroot"][wr], bot_c[i])
-            topd = np.minimum(top_c[i], bottom)
+            bottom = np.fmin(run["zroot"][wr], bot_c[i])
+            topd = np.fmin(top_c[i], bottom)
             ft = cover[wr] / (1 - np.exp(-bwater)) * (
                 (1 - np.exp(-bwater * bottom / lr)) - (1 - np.exp(-bwater * topd / lr)))
             up["fractransp"][i, wr] = ft
@@ -303,7 +324,7 @@ def _layer_et(ds, wr, cover, bare, bwater):
     wrr = wr[s > 0]
     up["fracroot"][:, wrr] = up["fracroot"][:, wrr] / up["fracroot"][:, wrr].sum(axis=0)
     up["fracET"][:, wr] = up["fracET"][:, wr] + up["fractransp"][:, wr]
-    run["cellET"] = np.maximum(0, run["ET"])[None, :] * up["fracET"]
+    run["cellET"] = np.fmax(0, run["ET"])[None, :] * up["fracET"]
     run["label"]["cellET"] = "Evapotranspiration"
     run["units"]["cellET"] = f"{ds['units']['mmscl']} cell^{{-1}}"
 
@@ -344,10 +365,10 @@ def _np_uptake(ds, wr, wswat, zero, stoichN, wN, wP, sclunits, incunits):
     else:
         run["frN"][wr] += cs["massfrac"][wN]
         run["frP"][wr] += cs["massfrac"][wP]
-        stoichN[:, wr] = 14.01 / run["frN"][wr].max()
+        stoichN[:, wr] = 14.01 / np.nanmax(run["frN"][wr])
     for el in ("N", "P"):
         run[f"{el}mass"] = run[f"fr{el}"] * run["totmass"]
-        run[f"{el}massinc"] = np.maximum(0, _diff_wrap(run[f"{el}mass"]))
+        run[f"{el}massinc"] = np.fmax(0, _diff_wrap(run[f"{el}mass"]))
         units[f"{el}mass"] = f"g{el} {sclunits}"
         units[f"{el}massinc"] = units[f"{el}mass"] + incunits
     label["Nmass"], label["Nmassinc"] = "Plant N mass", "Plant N mass increment"
@@ -367,7 +388,7 @@ def _cell_up(ds, uzero, zero, sclunits, incunits):
         if not len(w):
             continue
         lr = run["liveroot"][w]
-        bottom = lr if i == ds["ncells"] - 1 else np.minimum(lr, bot_c[i])
+        bottom = lr if i == ds["ncells"] - 1 else np.fmin(lr, bot_c[i])
         topup = 1 - np.exp(-nupdis * top_c[i] / lr)
         bottomup = 1 - np.exp(-nupdis * bottom / lr)
         run["cellup"][i, w] = (bottomup - topup) / (1 - np.exp(-nupdis))
@@ -397,7 +418,8 @@ def _cell_up(ds, uzero, zero, sclunits, incunits):
     for igs in range(1, len(wstart) + 1):
         w = np.flatnonzero(run["GS"] == igs)
         tm = run["totmass"][w]
-        wmax = w[np.flatnonzero(tm == tm.max())[0]]
+        # MATLAB max skips NaN (a one-day season after a harvest gives 0/0 in frPHU)
+        wmax = w[np.flatnonzero(tm == np.nanmax(tm))[0]]
         for el in ("N", "P"):
             scl = run[f"{el}mass"][wmax] / np.sum(run[f"{el}massinc"][w])
             run[f"{el}massinc"][w] *= scl

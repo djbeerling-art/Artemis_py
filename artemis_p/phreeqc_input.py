@@ -219,7 +219,7 @@ class PhreeqcRun:
         elif ds.get("MIXdir") == "bottomup":
             stg["topdown"], stg["bottomup"] = 0, 1
         run = ds["run"]
-        stg["usedust"] = np.max(run["treated"])
+        stg["usedust"] = np.nanmax(run["treated"])
         if "mmH2O" in run and "targH2O" not in run:
             run["targH2O"] = run["mmH2O"]
         if "rootresidue" not in run:
@@ -321,7 +321,7 @@ class PhreeqcRun:
             self._uncharged_surface_sites()
         scheme["Nhumaformula"] = "Amm 1 CO2 16.3314" if stg["releaseCO2"] else "Amm 1"
         if stg["includehumus"] and not self.restart:
-            self.kinflag[:, self.istart - 1] = np.maximum(1, self.kinflag[:, self.istart - 1])
+            self.kinflag[:, self.istart - 1] = np.fmax(1, self.kinflag[:, self.istart - 1])
         self.step = np.ones(ds["nrun"]) * ds["datastep"]
         run, cell = ds["run"], ds["cell"]
         if stg["usewater"]:
@@ -418,11 +418,11 @@ class PhreeqcRun:
             Nnit = scheme["frnit"] / (scheme["frnit"] + scheme["frvol"])
             Nvol = scheme["frvol"] / (scheme["frnit"] + scheme["frvol"])
         # MATLAB max/min ignore NaN, so 0/0 becomes the bound
-        scheme["Nvol"] = np.minimum(np.fmax(Nvol, 0), 1)
-        scheme["Nnit"] = np.minimum(np.fmax(Nnit, 0), 1)
-        sut = 0.1 + 0.9 * np.sqrt(np.maximum(1e-7, targ - WP[:, None]) / (FC - WP)[:, None])
-        sut = np.minimum(scheme["maxsut"], sut)
-        scheme["sut"] = np.maximum(0.05, sut)
+        scheme["Nvol"] = np.fmin(np.fmax(Nvol, 0), 1)
+        scheme["Nnit"] = np.fmin(np.fmax(Nnit, 0), 1)
+        sut = 0.1 + 0.9 * np.sqrt(np.fmax(1e-7, targ - WP[:, None]) / (FC - WP)[:, None])
+        sut = np.fmin(scheme["maxsut"], sut)
+        scheme["sut"] = np.fmax(0.05, sut)
         if self.schemeratesfile.lower() == "swatratesphases2":
             scheme["void"] = np.asarray(cell["por"])[:, None] * (1 - targ / np.asarray(cell["SAT"])[:, None])
         scheme["pctorgC"] = np.repeat((np.asarray(cell["gSOC"]) / np.asarray(cell["gsoil"]) * 100)[:, None],
@@ -453,19 +453,20 @@ class PhreeqcRun:
         if "rootresidue" not in run:
             run["rootresidue"] = np.zeros((ncells, nrun))
             stg["includerootresidues"] = 0
-        if np.max(run["rootmass"]) <= 0:
+        if np.nanmax(run["rootmass"]) <= 0:
             stg["includerootresidues"] = 0
         if "residue" not in run:
             run["residue"] = np.zeros((ncells, nrun))
             stg["includeresidues"] = 0
-        stg["includemanure"] = stg["includemanure"] * (np.max(run["manure"]) > 0)
-        stg["includerootresidues"] = stg["includerootresidues"] * (np.max(run["rootresidue"]) > 0)
-        stg["includeresidues"] = stg["includeresidues"] * (np.max(run["residue"]) > 0)
+        stg["includemanure"] = stg["includemanure"] * (np.nanmax(run["manure"]) > 0)
+        stg["includerootresidues"] = stg["includerootresidues"] * (np.nanmax(run["rootresidue"]) > 0)
+        stg["includeresidues"] = stg["includeresidues"] * (np.nanmax(run["residue"]) > 0)
         if "gSOC" not in cell:
             stg["includehumus"] = 0
         if not stg["usedust"]:
             from .phasetable import check_phase_type
-            ds["phasetable"] = check_phase_type(ds["phasetable"], ds, ignorefeedstock="all")
+            # updates ds["phasetable"] in place
+            check_phase_type(None, ds, ignorefeedstock="all")
             pt = ds["phasetable"]
         if pt is not None:
             kin = pt["PHREEQCphasetype"] == "kinetic"

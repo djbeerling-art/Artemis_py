@@ -429,7 +429,7 @@ def _getfsrelease(out, ds, ilast, tzero, szero, tCO2ha, CO2lab, cfluxlab):
         if pt.loc[p, "reversible"]:
             diff = np.cumsum(M0[p][:, :ilast] - M[p][:, :ilast], axis=1)
         else:
-            diff = np.cumsum(np.maximum(0, M0[p][:, :ilast] - M[p][:, :ilast]), axis=1)
+            diff = np.cumsum(np.fmax(0, M0[p][:, :ilast] - M[p][:, :ilast]), axis=1)
         for e, st in ds["stoich"][p].items():
             if e.lower() in ("h", "o"):
                 continue

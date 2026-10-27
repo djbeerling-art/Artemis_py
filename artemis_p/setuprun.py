@@ -57,11 +57,11 @@ def setup_run(ds, et_method="MIXflow", co2scl=1.0, legacy_airpor=False, **swat_k
         soilco2opt = "atmospheric"
         crop = parm.get("crop", ds.get("crop", ""))
         if "soilresp" in run:
-            if np.max(run["soilresp"]) > 0:
+            if np.nanmax(run["soilresp"]) > 0:
                 soilco2opt = "timeseries"
             elif str(crop).lower() in ("sorghum", "oil palm"):
                 raise NotImplementedError(f"soil respiration for {crop} is not ported")
-        elif "totmassinc" in run and np.max(run["totmassinc"]) > 0:
+        elif "totmassinc" in run and np.nanmax(run["totmassinc"]) > 0:
             raise NotImplementedError("Raich soil respiration is not ported")
         parm["soilco2opt"] = soilco2opt
     if "pCO2g" in scale:
@@ -93,9 +93,9 @@ def set_mix_fracs(ds):
     run["bypassin"] = np.zeros((nc, n))
     run.setdefault("qdrain", np.zeros((nc, n)))
     inperc, outperc, targ, infil = run["inperc"], run["outperc"], run["targH2O"], run["infil"]
-    inflow = np.maximum(0, inperc) + run["bypassin"]
-    outflow = np.maximum(0, outperc) + run["qdrain"]
-    upflow = -np.minimum(0, outperc)
+    inflow = np.fmax(0, inperc) + run["bypassin"]
+    outflow = np.fmax(0, outperc) + run["qdrain"]
+    upflow = -np.fmin(0, outperc)
     run["cellFC"] = cellFC = targ + inflow
     wleach = np.flatnonzero(outperc[-1] > 0)
     wdrain = np.flatnonzero(run["qdrain"].sum(axis=0) > 0)
@@ -119,11 +119,11 @@ def set_mix_fracs(ds):
         mf[m(1, 2)] = 1
         mf[m(1, 3)] = upflow[1] / targ[1]
         for i in range(2, nc):
-            mf[m(i, i)] = np.maximum(0, inperc[i - 1]) / cellFC[i - 2]
+            mf[m(i, i)] = np.fmax(0, inperc[i - 1]) / cellFC[i - 2]
             mf[m(i, i + 1)] = 1
             mf[m(i, i + 2)] = inflow[i] / targ[i]
         i = nc
-        mf[m(i, i)] = np.maximum(0, inperc[i - 1]) / cellFC[i - 2]
+        mf[m(i, i)] = np.fmax(0, inperc[i - 1]) / cellFC[i - 2]
         mf[m(i, i + 1)] = (targ[i - 1] + upflow[i - 1]) / targ[i - 1]
         # overwrites the values above with upflow(i)/targH2O(i) (see PORTING_PLAN.md)
         if fixed(ds, "upflow_fractions"):  # upflow(i) comes from cell i+1's water
@@ -138,7 +138,7 @@ def set_mix_fracs(ds):
             postmix[k] = infil * mf[k, 0] + targ[k] * mf[k, i]
             if i > 1:
                 postmix[k] = postmix[k] + cellFC[k - 1] * mf[k, i - 1]
-        mf[nleach - 1, nc] = np.maximum(0, outperc[nc - 1]) / (cellFC[nc - 1] - outflow[nc - 1] + upflow[nc - 1])
+        mf[nleach - 1, nc] = np.fmax(0, outperc[nc - 1]) / (cellFC[nc - 1] - outflow[nc - 1] + upflow[nc - 1])
         if ndrain > 0:
             for j in range(1, nc + 1):
                 mf[ndrain - 1, j] = run["qdrain"][j - 1] / cellFC[j - 1]
@@ -151,7 +151,7 @@ def set_mix_fracs(ds):
     # Days with cellFC != targH2O outside the irrigation days (all days here) need no fix
     w = cellFC == 0
     cellFC[w] = targ[w]
-    dET = np.maximum(0.01, cellFC - run["cellET"] - run["rhizon"])
+    dET = np.fmax(0.01, cellFC - run["cellET"] - run["rhizon"])
     if "MIXflow" in ds["ETmethod"]:
         run["ETmix"] = dET / cellFC
         run["postmixET"] = cellFC * run["ETmix"]
@@ -231,10 +231,10 @@ def get_soil_co2g(ds):
     por = np.asarray(cell["por"], float)[:, None]
     if "airpor" not in run and "Sws" in run:
         if "fc" in cell:
-            run["airpor"] = np.maximum(por - np.asarray(cell["fc"], float)[:, None], por - run["Sws"])
+            run["airpor"] = np.fmax(por - np.asarray(cell["fc"], float)[:, None], por - run["Sws"])
         else:
-            run["airpor"] = np.maximum(0.09, por - run["Sws"])
-        run["trueairpor"] = np.maximum(0, por - run["Sws"])
+            run["airpor"] = np.fmax(0.09, por - run["Sws"])
+        run["trueairpor"] = np.fmax(0, por - run["Sws"])
     if "airpor" in run and "watertabledepth" not in run:
         raise NotImplementedError("water table from air porosity is not ported")
     if "impermeabledepth" not in run and "watertabledepth" in run:
@@ -332,7 +332,7 @@ def set_residues(ds):
         w = np.flatnonzero(np.asarray(run["harvest"]) > 0)
         if len(w):
             run["rootresidue"][:, w] = run["rootmass"][w] * run["cellup"][:, w]
-            run["residue"][:, w] = np.maximum(0, run["totmass"][w] - run["harvest"][w] - run["rootmass"][w]) * till[:, None]
+            run["residue"][:, w] = np.fmax(0, run["totmass"][w] - run["harvest"][w] - run["rootmass"][w]) * till[:, None]
     return ds
 
 

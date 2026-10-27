@@ -213,9 +213,9 @@ class _SoilWaterMovement:
 
     def set_soil_water_fractions(self):
         c = self.c
-        c["vol_ice"] = np.minimum(c["watsat"], c["h2osoi_ice"] / (c["dz"] * DENICE))
-        c["eff_porosity"] = np.maximum(0.01, c["watsat"] - c["vol_ice"])
-        c["icefrac"] = np.minimum(1, c["vol_ice"] / c["watsat"])
+        c["vol_ice"] = np.fmin(c["watsat"], c["h2osoi_ice"] / (c["dz"] * DENICE))
+        c["eff_porosity"] = np.fmax(0.01, c["watsat"] - c["vol_ice"])
+        c["icefrac"] = np.fmin(1, c["vol_ice"] / c["watsat"])
 
     def heat_capacity(self):
         """cv from paramsforfreezing (the other outputs are not used)."""
@@ -286,7 +286,7 @@ class _SoilWaterMovement:
     def soilwater_zengdecker2009(self):
         c, nlevsoi, e_ice = self.c, self.nlevsoi, self.e_ice
         self.set_soil_water_fractions()
-        c["vwc_liq"] = np.maximum(c["h2osoi_liq"], 1.0e-6) / (c["dz"] * DENH2O)
+        c["vwc_liq"] = np.fmax(c["h2osoi_liq"], 1.0e-6) / (c["dz"] * DENH2O)
         jwt = self.getjwt()
         n = nlevsoi
         watsat, sucsat, bsw, hksat = c["watsat"], c["sucsat"], c["bsw"], c["hksat"]
@@ -698,7 +698,7 @@ class _SoilWaterMovement:
         c["jdrain"] = jdrain
         c["excess"] = 0.0
         self.set_soil_water_fractions()
-        c["vwc_liq"] = np.maximum(c["h2osoi_liq"], 1.0e-6) / (c["dz"] * DENH2O)
+        c["vwc_liq"] = np.fmax(c["h2osoi_liq"], 1.0e-6) / (c["dz"] * DENH2O)
         c["zwtmm"] = c["zwt"] * 1000
         c["qin"], c["qout"] = c["z"] * 0, c["z"] * 0
         if self.addice:
