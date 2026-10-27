@@ -59,3 +59,30 @@ def test_init_layer_data():
     ours = {k: v for k, v in ds["layer"].items() if k not in skip}
     assert matref.differences(ours, {k: v for k, v in ref.items() if k not in skip}, "layer") == []
     assert set(ds["layer"]["source"]) == set(ref["source"]) - {"soilsoln"}
+
+
+def test_phase_table():
+    from artemis_p.phasetable import get_phase_table
+
+    root = Path(os.environ["ARTEMIS"])
+    files = [root / "examples" / "EF_data" / "Richland_loess_Batestown_till_phases_combined.csv"] + [
+        root / "phreeqcdbincludefiles" / f
+        for f in ("secondary_phases.csv", "feedstock_phases_pure.csv", "feedstock_phases_Lewis_THERMODDEM.csv")
+    ]
+    t = None
+    for f in files:
+        t = get_phase_table(f, t)
+    ref = ref_ds()["phasetable"]
+    rows = ref["_rownames"]
+    # setupphases later keeps only the phases in use, adds columns and the
+    # implicit phase, and marks Titanite/Hydroxyapatite implicit (parm=implicit).
+    later = {"Implicit_blueridge"}
+    implicit = {"Titanite_blueridge", "Hydroxyapatite_blueridge"}
+    assert set(rows) - set(t.index) == later
+    for c in t.columns:
+        if c == "csvfile":  # authors' paths
+            continue
+        keep = [i for i, r in enumerate(rows) if r not in later and not (c == "PHREEQCphasetype" and r in implicit)]
+        ours = [t.loc[rows[i], c] for i in keep]
+        assert matref.differences(ours, [ref[c][i] for i in keep], c) == []
+    assert (t.loc[list(implicit), "PHREEQCphasetype"] == "ignore").all()

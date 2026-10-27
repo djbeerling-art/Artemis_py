@@ -34,7 +34,7 @@ Plotting code (`getfig`, `show*`, figure scripts) is not ported.
 
 1. **Infrastructure (done).** PHREEQC runner, `.sel` reader and comparison,
    `.mat` loader, rBcomp day-1 regression test.
-2. **Input reading (~2,000 lines; in progress: `readcsvdata`, `getperiodictable`, `readtimetable`, `getdecyear`, `getscreenedtable`, `setmodelspecies`, `readinitlayerdata` done).** `readinputfiles`, `readcsvdata`,
+2. **Input reading (~2,000 lines; in progress: `readcsvdata`, `getperiodictable`, `readtimetable`, `getdecyear`, `getscreenedtable`, `setmodelspecies`, `readinitlayerdata`, `getphasetable`, `checkphasetype` (table defaults) done).** `readinputfiles`, `readcsvdata`,
    `readtimetable`, `readinitlayerdata`, `readobsdata`, `getscreenedtable`,
    `getphasetable`, `getperiodictable`, `setmodelspecies`, `getdecyear`.
    Checked against `ds.timetable`, `ds.layer`, `ds.phasetable` in the `.mat`.
@@ -79,6 +79,16 @@ flagged here to fix once the port is verified.
   correctly only when a parameter has exactly one missing layer. The EF input
   has no gaps, so the published runs are unaffected. Python fills each gap
   (`layers.fill_nan`).
+
+- **Density units (`setupphases.m` line 341).** When the feedstock density is
+  in g/cm3, it sets `rho_kgm3 = G./1000`. It should be `G.*1000`, so the value
+  is a factor of 10^6 too small (e.g. 0.0052 instead of 5206 for magnetite in
+  the saved rBcomp phase table). `rho_kgm3` is only read in `markPSDinit.m`
+  line 175, on the alternative ("Mark") surface-area path. That line also
+  indexes the table with an unquoted `rho_kgm3`. The default path
+  (`SAmethod='traditional'`, used by the published runs) computes
+  `G.*1000` correctly at line 225, so the published runs look unaffected.
+  To be confirmed when `markPSDinit` is ported.
 
 ## MATLAB call graph (rBcomp entry points)
 

@@ -3,7 +3,7 @@ name = "artemis_p"
 version = "0.0.1"
 description = "Python port of ARTEMIS v1.1, a reactive transport enhanced-weathering model for soils"
 requires-python = ">=3.10"
-dependencies = ["numpy", "scipy", "pandas"]
+dependencies = ["numpy", "scipy", "pandas", "mat-io"]
 
 [project.optional-dependencies]
 test = ["pytest"]

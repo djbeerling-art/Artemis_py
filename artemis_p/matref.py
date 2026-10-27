@@ -6,32 +6,80 @@ so it gives intermediate values to test the Python preprocessor against.
 """
 
 import numpy as np
+import pandas as pd
+
+try:  # mat-io decodes MATLAB tables, strings and datetimes; scipy cannot
+    import matio
+except ImportError:  # pragma: no cover
+    matio = None
 import scipy.io as sio
 from scipy.io.matlab import mat_struct
 
 
-def _convert(obj):
+def _convert_scipy(obj):
     if isinstance(obj, mat_struct):
-        return {f: _convert(getattr(obj, f)) for f in obj._fieldnames}
+        return {f: _convert_scipy(getattr(obj, f)) for f in obj._fieldnames}
     if isinstance(obj, np.ndarray) and obj.dtype == object:
-        return [_convert(o) for o in obj.ravel()]
-    if isinstance(obj, np.ndarray) and obj.dtype.kind == "U" and obj.size == 0:
-        return ""  # MATLAB empty char
-    if isinstance(obj, np.ndarray) and obj.dtype.kind in "iu":
-        # MAT-files store integer-valued doubles in the smallest integer type
-        return obj.astype(float)
+        return [_convert_scipy(o) for o in obj.ravel()]
+    return _leaf(obj)
+
+
+def _leaf(obj):
+    if isinstance(obj, np.ndarray):
+        if obj.dtype.kind == "U":
+            if obj.size == 0:
+                return ""  # MATLAB empty char
+            if obj.size == 1:
+                return str(obj.ravel()[0])
+            return [str(x) for x in obj.ravel()]
+        if obj.dtype.kind in "iu":
+            # MAT-files store integer-valued doubles in the smallest integer type
+            obj = obj.astype(float)
+        obj = np.squeeze(obj)
+        if obj.ndim == 0 and obj.dtype.kind in "fb":
+            return obj.item()
+        return obj
     return obj
+
+
+def _convert(obj):
+    """Turn mat-io output into dicts, lists of strings and squeezed arrays."""
+    if isinstance(obj, pd.DataFrame):
+        out = {c: _convert_column(obj[c]) for c in obj.columns}
+        out["_rownames"] = [str(i) for i in obj.index]
+        return out
+    if isinstance(obj, np.ndarray) and obj.dtype.names:
+        if obj.size == 1:
+            rec = obj.ravel()[0]
+            return {f: _convert(rec[f]) for f in obj.dtype.names}
+        return [{f: _convert(r[f]) for f in obj.dtype.names} for r in obj.ravel()]
+    if isinstance(obj, np.ndarray) and obj.dtype == object:
+        items = [_convert(o) for o in obj.ravel()]
+        return items[0] if obj.size == 1 else items  # 1x1 cell unwrapped, as scipy's squeeze_me does
+    return _leaf(obj)
+
+
+def _convert_column(col):
+    if col.dtype == object:
+        return [_convert(v) for v in col]
+    return col.to_numpy()
 
 
 def load_run(path, name=None):
     """Return the run struct in ``path`` as nested dicts.
 
-    ``name`` is the MATLAB variable name; by default the first non-internal one.
+    ``name`` is the MATLAB variable name; by default the first non-internal
+    one. MATLAB tables become dicts of columns (plus ``_rownames``).
     """
+    if matio is not None:
+        m = matio.load_from_mat(str(path))
+        if name is None:
+            name = next(k for k in m if not k.startswith("__"))
+        return _convert(m[name])
     m = sio.loadmat(path, squeeze_me=True, struct_as_record=False)
     if name is None:
         name = next(k for k in m if not k.startswith("__"))
-    return _convert(m[name])
+    return _convert_scipy(m[name])
 
 
 def differences(py, ref, path="", rtol=1e-12, atol=0.0):
