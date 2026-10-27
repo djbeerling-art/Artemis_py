@@ -73,8 +73,13 @@ Plotting code (`getfig`, `show*`, figure scripts) is not ported.
    near zero), a few isolated points of `d_CO2g`, `d_O2g`, `EDL`,
    `k_Suptake` at ~2% of tiny values, and two fields that MATLAB rewrites
    after the loop: `k_DINuptake` (`assessuptake`) and leachate `mass_H2O`
-   (`gettotalfields`). Still to port: `gettotalfields`, `assessuptake`,
-   `etaRH`, `getbasesatpct`, `assessrun2`, `checkuselog`.)**
+   (`gettotalfields`). End-of-run totals done: `artemis_p.totals` ports
+   `gettotalfields`, `getbasesatpct`, `assessuptake` and `etaRH`;
+   `PhreeqcRun.finish` runs them. Recomputed from the saved daily outputs they
+   reproduce every saved total to 1e-9, and from the Python run they match the
+   saved totals to the same tolerance as the daily fields. Still to port:
+   `readobsdata`/`setruncellindices` and `assessrun2` (model-observation
+   comparison).)**
 
 ## Known issues in the published v1.1 archive
 
@@ -133,6 +138,32 @@ Plotting code (`getfig`, `show*`, figure scripts) is not ported.
   `Ca2Mg5Si8O22(OH)2` (tremolite, as in its reaction and molar mass). The
   formula goes into the KINETICS `-formula` line, so each mole of native
   hornblende that dissolves releases 52 Mg instead of 5.
+
+- **Total cumulative CDR includes the whole soil carbonate stock
+  (`gettotalfields.m` `gettotalCDR`).** `total.cCDR = total.CDR +
+  total.soilCarbonate` adds the *daily* CDR to the soil carbonate *stock*,
+  which includes the native carbonate present from day 1. For rBcomp the final
+  `cCDR` is 638.4 t CO2/ha, of which 636.4 t was already in the soil on day 1;
+  marine CDR (`cCDRrh`) is 10.1 and the cumulative change in soil carbonate
+  (`cd_soilCarbonate`) is 1.8. The intended value is presumably
+  `cCDRrh + cd_soilCarbonate` (11.9 t CO2/ha).
+- **Release from native minerals is never recorded (`gettotalfields.m`
+  `getnatsoilrelease`).** The element field is built as `c<elt>release` but
+  looked up in a list of `c<elt>natrelease` names, so it never matches. Native
+  release goes into the feedstock fields `c<elt>release`, which
+  `getfsrelease` then resets for Ca, Mg, Na, K and any element also in the
+  feedstock. `cCanatrelease`, `cCaMgNanatrelease`, `ccateqnatrelease` and
+  `ccateqnatCECrat` are zero throughout the saved rBcomp run. Elements found
+  only in native phases keep their native release under the "from feedstock"
+  label.
+- **Feedstock cation release is converted to CO2 units twice
+  (`gettotalfields.m` `getfsrelease`).** `total.cCarelease` and
+  `total.cMgrelease` are multiplied by 2 and by `tCO2ha`, and Na/K by
+  `tCO2ha` ("for comparison with TiCAT"). `cCaMgNarelease` then multiplies
+  these by 2 and `tCO2ha` again, and `ccateqrelease` adds `cKrelease*tCO2ha`.
+  For rBcomp the final `cCaMgNarelease` is 14.36 instead of 16.31 t CO2/ha
+  (the sum of the already-converted fields), and `ccateqCECrat` inherits the
+  error. The per-cell `soil` fields are converted once and are consistent.
 
 ### Other issues
 
@@ -312,6 +343,26 @@ flagged here to fix once the port is verified.
   for the whole run.
 - **CEC scaling ignored (`CECsorb.m`).** If `ds.scale` exists without a `CEC`
   field (EF has `ds.scale.pCO2g`), `parm.CECscl` is ignored.
+
+- **Remaining feedstock double counted (`gettotalfields.m` `getfsrelease`).**
+  `total.<elt>feedstock` adds `sum(soil.<elt>feedstock)` after each phase, but
+  the soil field is itself a running sum over phases, so earlier phases are
+  counted again for every later phase with that element.
+- **Passive plus active uptake (`gettotalfields.m` `gettotupphases`).**
+  `dkfld=strrep(pfld,'dp_','dk_')` works on the `p_` name, so `dt_<nut>uptake`
+  is daily passive plus *cumulative passive* uptake rather than daily passive
+  plus daily active uptake.
+- **Per-cell CEC ratios use the top cell (`gettotalfields.m`).**
+  `soil.ccateqCECrat` and `soil.ccateqnatCECrat` divide row 1 of the release
+  by each cell's CEC.
+- **Total DIN fields before `assessuptake` (`gettotalfields.m`).**
+  `total.dk_DINuptake` and `total.t_DINuptake` are built from the nitrate-only
+  soil fields before `assessuptake` replaces them with nitrate plus ammonium.
+- **Depth units in observation files (`readobsdata.m`, `setruncellindices.m`,
+  `assessrun2.m`).** A scale for depths in m or mm is computed but never
+  applied, so all depths are taken as cm.
+- **Observation table names keep `obs_` (`readobsdata.m` `gettablename`).** The
+  second `strrep` starts again from the file name, discarding the first.
 
 ## MATLAB call graph (rBcomp entry points)
 

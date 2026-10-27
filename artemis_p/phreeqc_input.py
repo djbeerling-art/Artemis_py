@@ -24,6 +24,7 @@ from . import phreeqc
 from .mformat import sprintf
 from .rsa import update_rsa
 from .selected_output import get_selected_output, reshape_selected_output
+from .totals import gettotalfields
 
 MONTHNAME = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
@@ -568,7 +569,8 @@ class PhreeqcRun:
         self.setruninfo()
 
     def setruninfo(self):
-        """The parts of setruninfo that change settings (the rest only builds text for stdout)."""
+        """The parts of setruninfo that change settings, plus out.runinfo's including/excluding
+        text (gettotalfields looks for ' dust' in it). The rest only builds text for stdout."""
         stg, md = self.stg, self.out["metadata"]
         stg["skipSAinKINETICS"] = 0 if self.SAmethod.lower() == "inbuilt" else 1
         md["SAmethod"] = self.SAmethod
@@ -576,6 +578,56 @@ class PhreeqcRun:
         md["EXCHmethod"] = self.EXCHmethod
         if "treatments" not in self.ds:
             stg["includetreatments"] = 0
+        ri = self.out.setdefault("runinfo", {})
+        ri["treatments"] = " ".join(np.atleast_1d(self.ds["treatments"])) if stg["includetreatments"] else "none"
+        inc, exc = "Including ", "Excluding "
+        if stg["useexchange"]:
+            inc += "EXCHANGE " + ("(+Xb) " if stg["includedynexchange"] else "(static only) ")
+        else:
+            exc += "EXCHANGE "
+        if stg["usesurface"]:
+            inc += "SURFACE " + ("(+dynamic) " if stg["includedynamicsurfaces"] else "(static only) ")
+        else:
+            exc += "SURFACE "
+        if stg["includeuptake"]:
+            inc += "uptake "
+            if stg["includeAmmuptake"] == 0:
+                exc += "Ammuptake "
+        else:
+            exc += "uptake "
+        if stg["nocounterion"]:
+            exc += "counterions "
+        else:
+            inc += "counterions "
+        if stg["includeNkinetics"]:
+            inc += "N-kinetics "
+        else:
+            exc += "N-kinetics "
+        if stg["includenative"]:
+            inc += "native minerals"
+        else:
+            exc += "native minerals "
+        if self.nkinphase > 0:
+            treated = np.sum(np.ravel(self.ds["run"]["treated"])[self.istart - 1:self.ilast])
+            if stg["usedust"] and treated:
+                inc += " dust " + self.fsname
+                md["phasesratesfile"] = self.phasesratesfile
+                md["kinstoichmethod"] = "-formula" if stg["kinrelease"] else "PHASES"
+                ri["kinstoichmethod"] = sprintf("stoichiometry from %s, using %s)", md["kinstoichmethod"],
+                                                self.phasesratesfile)
+            elif stg["usedust"]:
+                exc += sprintf(" dust (%s, pre-treatment)", self.fsname)
+            else:
+                exc += " dust"
+        if not stg["equilibratesurface"]:
+            exc += " SURFACE equilibration"
+        for flag, name in (("includehumus", "humus"), ("includeresidues", "residues"),
+                           ("includerootresidues", "root residues"), ("includemanure", "manure")):
+            if stg[flag]:
+                inc += f" {name} "
+            else:
+                exc += f" {name} "
+        ri["including"], ri["excluding"] = inc, exc
 
     def setfilename(self):
         ds, md, stg = self.ds, self.out["metadata"], self.stg
@@ -798,6 +850,31 @@ class PhreeqcRun:
         out["run"]["stopwatch"][i] = time.time() - tic
         self.init = 0
         return res
+
+    def finish(self):
+        """getphreeqcrun's cleanup: end-of-run totals (gettotalfields) and run metadata."""
+        ds, out, md = self.ds, self.out, self.out["metadata"]
+        out["run"]["kinflag"] = self.kinflag
+        md["scheme"] = self.scheme
+        idone = len(out["run"]["stopwatch"])
+        if idone < md["ilast"]:
+            md["ilast"] = self.ilast = idone
+        if idone < ds["nrun"]:  # MATLAB's output arrays grow day by day; ours are preallocated
+            for grp in ("soil", "influent", "leachate"):
+                for f, v in out[grp].items():
+                    if isinstance(v, np.ndarray) and v.ndim == 2 and v.shape[1] == ds["nrun"]:
+                        out[grp][f] = v[:, :idone]
+        gettotalfields(out, ds)
+        out["total"]["label"]["exptday"] = "Day of experiment"
+        out["label"]["exptday"] = "Day of experiment"
+        start = md.get("istart0", self.istart)
+        mins = sum(v for d, v in out["run"]["stopwatch"].items() if start <= d <= idone) / 60
+        errs = [d for d, e in out["run"]["errdesc"].items() if e != "PHREEQC OK"]
+        what = f"ERROR at day {idone - self.istart + 1}" if errs else f"{idone - self.istart + 1} days"
+        md["runtime"] = sprintf("Runtime for %s (%s, %d warnings): %g minutes", md["runname"], what,
+                                sum(out["run"]["nwarnings"].values()), mins)
+        md["dumpfile"] = self.fname + ".dmp"
+        return out
 
     def addtoselectedoutput(self, m):
         ds, out, i = self.ds, self.out, self.i

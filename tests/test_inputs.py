@@ -466,3 +466,37 @@ def test_first_days_match_saved_outputs(tmp_path):
     for p in r.kinphase:
         b = np.asarray(run["run"]["RSA"][p], float)[:, :ndays]
         assert np.allclose(r.out["run"]["RSA"][p][:, :ndays], b, rtol=1e-4, atol=1e-12), p
+
+
+def test_end_of_run_totals():
+    """gettotalfields/assessuptake recompute the saved totals from the saved daily outputs.
+
+    assessuptake overwrote the saved soil dk_*uptake and k_DINuptake fields after
+    gettotalfields summed them, so the totals built from those fields differ."""
+    import copy
+
+    import numpy as np
+    import pandas as pd
+
+    from artemis_p.totals import gettotalfields
+
+    run = matref.load_run(Path(os.environ["ARTEMIS_PHREEQC"]) / f"{RBCOMP}.mat")
+    added_soil = {"elapsedyear", "BSpct", "soilCarbonate", "d_soilCarbonate", "cd_soilCarbonate", "upeq", "dupeq",
+                  "DINsys", "runindex", "label"}
+    out = {k: copy.deepcopy(run[k]) for k in ("metadata", "leachate", "run", "runinfo")}
+    out["soil"] = {k: copy.deepcopy(v) for k, v in run["soil"].items()
+                   if k not in added_soil and not k.startswith("eff_") and "release" not in k
+                   and "feedstock" not in k and "native" not in k and "CDR" not in k and "CECrat" not in k}
+    out["units"], out["label"] = {}, {}
+    ds = dict(run["ds"])
+    pt = ds["phasetable"]  # the port keeps ds.phasetable as a DataFrame
+    ds["phasetable"] = pd.DataFrame({k: v for k, v in pt.items() if k != "_rownames"}, index=pt["_rownames"])
+    gettotalfields(out, ds)
+    for grp in ("total", "soil", "annual"):
+        for f, b in run[grp].items():
+            if isinstance(b, (dict, str, list)) or (grp == "total" and f.startswith("dk_") and "uptake" in f) \
+                    or f in ("t_DINuptake", "runindex"):  # runindex comes from assessrun2
+                continue
+            a = out[grp][f]
+            assert np.allclose(np.asarray(a, float).reshape(np.shape(b)), b, rtol=1e-9, atol=1e-12,
+                               equal_nan=True), f"{grp}.{f}"

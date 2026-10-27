@@ -30,7 +30,7 @@ from artemis_p.reference import AUTHOR_DBDIR, AUTHOR_OUTDIR, rbcomp_run_settings
 
 def compare(grp, ours, ref, ndays, tol=1e-3):
     for f in sorted(ours):
-        if f not in ref:
+        if f not in ref or isinstance(ref[f], (dict, str, list)):
             continue
         b = np.asarray(ref[f], float)
         a = np.asarray(ours[f], float).reshape(b.shape)[..., :ndays]
@@ -63,9 +63,13 @@ def main(ndays, work):
         if i % 50 == 0:
             print(f"day {i}: {time.time() - t0:.0f} s", flush=True)
     print(f"{ndays} days in {time.time() - t0:.0f} s")
+    if ndays == len(saved["run"]["current"]):
+        r.finish()
     pickle.dump(r.out, open(Path(work) / "out.pkl", "wb"))
 
-    for grp in ("soil", "influent", "leachate"):
+    for grp in ("soil", "influent", "leachate", "total", "annual"):
+        if grp not in r.out:
+            continue
         compare(grp, r.out[grp], saved[grp], ndays)
     for k in ("RSA", "M0", "grams"):
         for p, v in saved["run"][k].items():
