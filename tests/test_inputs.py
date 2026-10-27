@@ -166,3 +166,40 @@ def test_cells_from_layers():
     for i, r in enumerate(rpt["_rownames"]):
         if r in pt.index:
             assert pt.loc[r, "PHREEQCphasetype"] == rpt["PHREEQCphasetype"][i], r
+
+
+@lru_cache(maxsize=1)
+def _ef_cells():
+    """EF ds after getcellsfromlayers, built the way test_cells_from_layers does."""
+    from artemis_p.cells import get_cells_from_layers
+    from artemis_p.chemistry import read_initial_chemistry
+    from artemis_p.layers import read_init_layer_data
+
+    data = Path(os.environ["ARTEMIS"]) / "examples" / "EF_data"
+    ds = {"parm": {"nativeRSAscale": 1e-6, "implicit": ["Titanite_blueridge", "Hydroxyapatite_blueridge"],
+                   "tillagedepth": 18, "Feactfrac": 0.01, "SOCactfrac": 0.629, "CECopt": "CECcarboxylic",
+                   "setexaciditysp": "Al"},
+          "phasetable": _ef_phase_table(), "EXCHmethod": "comp", "scale": {"pCO2g": 1.0}}
+    ds = read_init_layer_data(ds, data / "initlayers_Flanagan_EF_0-183cm.csv")
+    ds = read_initial_chemistry(ds, data / "rainwater_Champaign_NTN_2021_initialChemistry.csv")
+    return get_cells_from_layers(ds)
+
+
+def test_cec_sorb():
+    import copy
+
+    from artemis_p.sorption import cec_sorb, set_soil_texture
+
+    ds = set_soil_texture(copy.deepcopy(_ef_cells()))
+    ds = cec_sorb(ds)
+    cell, rcell = ds["cell"], ref_ds()["cell"]
+    for k in ("tillagefrac", "X", "basesatsum", "cecsum", "CECcmolckgsoil", "eqCEC", "SOCeq", "XCECfrac",
+              "exchange", "CEC"):
+        assert matref.differences(cell[k], rcell[k], k, rtol=1e-12) == [], k
+    for k, v in cell["surface"].items():
+        assert matref.differences(v, rcell["surface"][k], k, rtol=1e-12) == [], k
+    for k in ("X", "CEC", "exchange", "basesatsum", "cecsum", "eqCEC", "SOCeq"):
+        assert cell["units"][k] == rcell["units"][k], k
+    assert cell["units"]["surface"] == {k: v for k, v in rcell["units"]["surface"].items() if k in cell["units"]["surface"]}
+    wham = ref_ds()["parm"]["WHAM"]
+    assert ds["parm"]["WHAM"] == {k: (int(v) if isinstance(v, float) else v) for k, v in wham.items()}

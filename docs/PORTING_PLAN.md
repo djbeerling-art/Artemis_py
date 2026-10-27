@@ -38,7 +38,7 @@ Plotting code (`getfig`, `show*`, figure scripts) is not ported.
    `readtimetable`, `readinitlayerdata`, `readobsdata`, `getscreenedtable`,
    `getphasetable`, `getperiodictable`, `setmodelspecies`, `getdecyear`.
    Checked against `ds.timetable`, `ds.layer`, `ds.phasetable` in the `.mat`.
-3. **Soil, phases and chemistry setup (~4,000 lines; in progress: `getcellsfromlayers`, `setupsoilphases`, `pedotransfer`, full `checkphasetype` done).** `setupphases`,
+3. **Soil, phases and chemistry setup (~4,000 lines; in progress: `getcellsfromlayers`, `setupsoilphases`, `pedotransfer`, full `checkphasetype`, `setsoiltexture`, `CECsorb` done).** `setupphases`,
    `setupsoilphases`, `checkphasetype`, `implicitcalc`, `getcellsfromlayers`,
    `pedotransfer`, `markPSDinit`, `getRosinRammlerPSD`, `setnucSA`,
    `setstoichiometry`, `CECsorb`, `Cerling1991`, `getfert`, `setupnutuptake`,
@@ -135,6 +135,17 @@ flagged here to fix once the port is verified.
   are unaffected.
 - **Label slip (`getcellsfromlayers.m`).** It sets `units.thickness='fraction'`
   where `units.frac` was meant. Cosmetic only.
+- **`eqCEC` is 100 times too large (`CECsorb.m` line 391).**
+  `eqCEC=cecsum.*gsoil/1000` uses `cecsum` while it is still in meq/100 g, so
+  the result is 100x the eq/cell in its label (EF top cell: 1863.6 instead of
+  18.6). It feeds only the `ccateqCECrat` diagnostic in `gettotalfields.m`,
+  so the PHREEQC run is unaffected but that reported ratio is 100x too small.
+- **HFO iron from FeOOH phases (`CECsorb.m`).** Iron for the HFO surface is
+  taken as `moles/100*55.85/molmass`, which treats a mole amount as a soil mass
+  percent. EF has no native FeOOH phase, so it falls back to 2.79 mg Fe/g soil
+  and is unaffected.
+- **CEC scaling ignored (`CECsorb.m`).** If `ds.scale` exists without a `CEC`
+  field (EF has `ds.scale.pCO2g`), `parm.CECscl` is ignored.
 
 ## MATLAB call graph (rBcomp entry points)
 
