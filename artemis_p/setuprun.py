@@ -11,6 +11,7 @@ import math
 import numpy as np
 
 from .csvdata import read_csv_data
+from .fixes import enabled as fixed
 from .richards import get_rich_quick
 from .swat import day_swat
 
@@ -125,8 +126,12 @@ def set_mix_fracs(ds):
         mf[m(i, i)] = np.maximum(0, inperc[i - 1]) / cellFC[i - 2]
         mf[m(i, i + 1)] = (targ[i - 1] + upflow[i - 1]) / targ[i - 1]
         # overwrites the values above with upflow(i)/targH2O(i) (see PORTING_PLAN.md)
-        for i in range(1, nc - 1):
-            mf[m(i, i + 2)] = upflow[i - 1] / targ[i - 1]
+        if fixed(ds, "upflow_fractions"):  # upflow(i) comes from cell i+1's water
+            for i in range(1, nc):
+                mf[m(i, i + 2)] = upflow[i - 1] / targ[i]
+        else:
+            for i in range(1, nc - 1):
+                mf[m(i, i + 2)] = upflow[i - 1] / targ[i - 1]
         for i in range(1, nc + 1):
             k = i - 1
             mf[k] = mf[k] * (cellFC[k] + upflow[k] - outflow[k]) / cellFC[k]
@@ -305,7 +310,10 @@ def setup_nut_uptake(ds, usecrop=None):
             if crop == "fallow":
                 continue
             test = usecrop if usecrop is not None else crop
-            w = [r for r, (c, nu) in enumerate(zip(crops, nutrients)) if c == test and nu == nut]
+            if fixed(ds, "crop_case"):
+                w = [r for r, (c, nu) in enumerate(zip(crops, nutrients)) if c.lower() == test.lower() and nu == nut]
+            else:
+                w = [r for r, (c, nu) in enumerate(zip(crops, nutrients)) if c == test and nu == nut]
             if w:
                 idx[i] = w[0] + 1
         run[f"{nut}index"] = idx

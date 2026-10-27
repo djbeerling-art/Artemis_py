@@ -8,6 +8,8 @@ round to the first) are reproduced with ``np.roll``.
 
 import numpy as np
 
+from .fixes import enabled as fixed
+
 from .csvdata import read_csv_data
 
 
@@ -404,7 +406,10 @@ def _cell_up(ds, uzero, zero, sclunits, incunits):
                 cu[el][:, w] *= scl
             else:
                 # MATLAB rescales only the top cell's P uptake here (celluptake.P(1,w))
-                cu[el][0, w] *= scl
+                if fixed(ds, "p_uptake_all_cells"):
+                    cu[el][:, w] *= scl
+                else:
+                    cu[el][0, w] *= scl
             run[f"{el}mass"][w] = np.cumsum(run[f"{el}massinc"][w])
             tcu[el][w] = np.cumsum(tot[el][w])
             ccu[el][:, w] = np.cumsum(cu[el][:, w], axis=1)
@@ -432,7 +437,10 @@ def _nut_uptake(ds, stoichN, wN, zero, uzero):
             wcrop = np.flatnonzero(run["totmass"] > 0)
         else:
             # MATLAB contains() is case-sensitive: 'Maize' rows never match crop 'maize'
-            wcrop = np.flatnonzero([cs["crop"][i] in c for c in run["crop"]])
+            if fixed(ds, "crop_case"):
+                wcrop = np.flatnonzero([cs["crop"][i].lower() in c.lower() for c in run["crop"]])
+            else:
+                wcrop = np.flatnonzero([cs["crop"][i] in c for c in run["crop"]])
             if not len(wcrop):
                 continue
         stoichN[i, wcrop] = cs["conc"][i] / 1e6 * stoichN[i, wcrop]

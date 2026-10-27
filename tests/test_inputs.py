@@ -489,17 +489,11 @@ def test_first_days_match_saved_outputs(tmp_path):
         assert np.allclose(r.out["run"]["RSA"][p][:, :ndays], b, rtol=1e-4, atol=1e-12), p
 
 
-def test_end_of_run_totals():
-    """gettotalfields/assessuptake recompute the saved totals from the saved daily outputs.
-
-    assessuptake overwrote the saved soil dk_*uptake and k_DINuptake fields after
-    gettotalfields summed them, so the totals built from those fields differ."""
+def saved_totals_inputs(fixes=None):
+    """The saved rBcomp run, and the ``out`` and ``ds`` that gettotalfields starts from."""
     import copy
 
-    import numpy as np
     import pandas as pd
-
-    from artemis_p.totals import gettotalfields
 
     run = matref.load_run(Path(os.environ["ARTEMIS_PHREEQC"]) / f"{RBCOMP}.mat")
     added_soil = {"elapsedyear", "BSpct", "soilCarbonate", "d_soilCarbonate", "cd_soilCarbonate", "upeq", "dupeq",
@@ -512,6 +506,21 @@ def test_end_of_run_totals():
     ds = dict(run["ds"])
     pt = ds["phasetable"]  # the port keeps ds.phasetable as a DataFrame
     ds["phasetable"] = pd.DataFrame({k: v for k, v in pt.items() if k != "_rownames"}, index=pt["_rownames"])
+    if fixes is not None:
+        ds["fixes"] = fixes
+    return run, out, ds
+
+
+def test_end_of_run_totals():
+    """gettotalfields/assessuptake recompute the saved totals from the saved daily outputs.
+
+    assessuptake overwrote the saved soil dk_*uptake and k_DINuptake fields after
+    gettotalfields summed them, so the totals built from those fields differ."""
+    import numpy as np
+
+    from artemis_p.totals import gettotalfields
+
+    run, out, ds = saved_totals_inputs()
     gettotalfields(out, ds)
     for grp in ("total", "soil", "annual"):
         for f, b in run[grp].items():

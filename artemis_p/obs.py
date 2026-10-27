@@ -16,6 +16,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from .fixes import enabled as fixed
+from .forcing import depth_scale
+
 __all__ = ["read_obs_data", "set_run_cell_indices", "assessrun2", "checkuselog"]
 
 
@@ -120,6 +123,15 @@ def _run_index(t, run):
 
 
 def _middepth(t, ds, nan_bottom):
+    mid = _middepth_raw(t, ds, nan_bottom)
+    if mid is not None and fixed(ds, "depth_units"):
+        col = next(c for c in ("topdepth", "depth", "middepth", None) if c is None or c in t.columns)
+        if col is not None:
+            mid = mid * depth_scale(t.attrs.get("units", {}).get(col, "cm"))
+    return mid
+
+
+def _middepth_raw(t, ds, nan_bottom):
     names = list(t.columns)
     if "topdepth" in names and "bottomdepth" in names:
         top, bot = t["topdepth"].to_numpy(float), t["bottomdepth"].to_numpy(float)
@@ -143,7 +155,7 @@ def _middepth(t, ds, nan_bottom):
 
 def _cell_index(t, ds, none_value=0, nan_bottom="mid"):
     """Cell for each row from its mid-point depth (depth units other than cm are not
-    rescaled: MATLAB computes the scale but never applies it)."""
+    rescaled: MATLAB computes the scale but never applies it; fix ``depth_units``)."""
     if not any("depth" in n for n in t.columns):
         return np.full(len(t), float(none_value))
     idx = np.zeros(len(t))

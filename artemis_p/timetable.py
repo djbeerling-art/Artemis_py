@@ -9,9 +9,16 @@ from pathlib import Path
 import numpy as np
 
 from .csvdata import valid_name
+from .fixes import enabled as fixed
 
 # Cumulative day of year at the start of each month (non-leap year), indexed by month 1..12
 _CMON = np.cumsum([0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31])
+
+
+def is_leap(year):
+    """Gregorian leap years."""
+    year = np.asarray(year, dtype=float)
+    return (year % 4 == 0) & ((year % 100 != 0) | (year % 400 == 0))
 
 
 def is_leap_matlab(year):
@@ -26,11 +33,11 @@ def is_leap_matlab(year):
     return (year / 4 == np.floor(year / 4)) & (year / 400 < np.ceil(year / 400))
 
 
-def get_decyear(t, nomday=15):
+def get_decyear(t, nomday=15, gregorian=False):
     """Add ``leapy``, ``leapd``, ``doy``, ``decyear`` and labels to a dict of columns."""
     year = np.asarray(t["year"], dtype=float)
     month = np.asarray(t["month"], dtype=float)
-    leapy = is_leap_matlab(year)
+    leapy = is_leap(year) if gregorian else is_leap_matlab(year)
     t["leapy"] = leapy
     t["leapd"] = leapy & (month > 2)
     if "day" not in t:
@@ -95,7 +102,7 @@ def read_timetable(ds, fname, baskg=None):
     t = screen_table(read_table(fname), ds)
     if "inputfiles" in ds:
         ds["inputfiles"].append(str(fname))
-    ds["timetable"] = get_decyear(dict(t))
+    ds["timetable"] = get_decyear(dict(t), gregorian=fixed(ds, "leap_year"))
     if baskg is not None and "baskg" in ds["timetable"]:
         b = ds["timetable"]["baskg"]
         b[b > 0] = baskg

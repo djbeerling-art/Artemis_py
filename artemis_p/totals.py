@@ -8,7 +8,8 @@ getphreeqcrun's ``cleanup``.
 Soil arrays are (ncells, nrun); total and leachate time series are 1-D here
 (MATLAB's (1, nrun) rows).
 
-The MATLAB bugs that change results are reproduced (see docs/PORTING_PLAN.md):
+The MATLAB bugs that change results are reproduced unless ``ds['fixes']`` turns
+their fixes on (see artemis_p.fixes and docs/PORTING_PLAN.md):
 native-mineral release goes to the ``c<elt>release`` fields, where the feedstock
 step overwrites it, so ``c<elt>natrelease`` stays zero; ``cCDR`` adds the soil
 carbonate stock to the daily CDR; ``dt_*uptake`` adds the cumulative passive
@@ -18,6 +19,7 @@ uses the first cell's release only.
 
 import numpy as np
 
+from .fixes import enabled as fixed
 from .mformat import sprintf
 
 __all__ = ["gettotalfields", "getbasesatpct", "assessuptake", "etaRH"]
@@ -157,7 +159,8 @@ def gettotalfields(out, ds):
                 dt = dp.replace("dp_", "dt_")
                 t = p.replace("p_", "t_")
                 k = p.replace("p_", "k_")
-                dk = p.replace("dp_", "dk_")  # MATLAB bug: p has no 'dp_', so this is the passive p_ field
+                # MATLAB bug: p has no 'dp_', so this is the passive p_ field
+                dk = dp.replace("dp_", "dk_") if fixed(ds, "uptake_totals") else p.replace("dp_", "dk_")
                 total[p] = np.sum(soil[p] * H, axis=0)
                 total[dp] = np.sum(soil[dp] * H, axis=0)
                 tunits[p] = "mol " + scl
@@ -291,8 +294,10 @@ def _gettotalCDR(out, ds, istart, ilast, tzero, szero, H, tCO2ha, CO2lab, timela
     soil["cd_soilCarbonate"] = np.cumsum(soil["d_soilCarbonate"], axis=1)
     total["cd_soilCarbonate"] = np.sum(soil["cd_soilCarbonate"], axis=0)
     total["CDR"] = total["CDR"] + total["d_soilCarbonate"]
-    # MATLAB bug: adds the daily CDR to the soil carbonate stock, not the cumulative change
-    total["cCDR"] = total["CDR"] + total["soilCarbonate"]
+    if fixed(ds, "cdr_total"):
+        total["cCDR"] = total["cCDRrh"] + total["cd_soilCarbonate"]
+    else:  # MATLAB bug: adds the daily CDR to the soil carbonate stock, not the cumulative change
+        total["cCDR"] = total["CDR"] + total["soilCarbonate"]
 
     total["CDRDIC"] = total["DICflux"] * tCO2ha
     tunits["CDRDIC"] = CO2lab + timelab
@@ -343,7 +348,7 @@ def _getnatsoilrelease(out, ds, ilast, tzero, szero, tCO2ha, CO2lab, cfluxlab):
                 continue
             # MATLAB bug: looks for c<elt>release in a list of c<elt>natrelease names, so
             # native release goes to the feedstock release fields (and c<elt>natrelease stays 0)
-            cf = f"c{e}release"
+            cf = f"c{e}natrelease" if fixed(ds, "native_release") else f"c{e}release"
             if cf.lower() not in (c.lower() for c in cfld):
                 cfld.append(cf)
                 fs = e + "native"
@@ -375,7 +380,8 @@ def _getnatsoilrelease(out, ds, ilast, tzero, szero, tCO2ha, CO2lab, cfluxlab):
     eqCEC = np.asarray(ds["cell"]["eqCEC"], float).reshape(-1)
     total["ccateqnatCECrat"] = total["ccateqnatrelease"] / tCO2ha / np.sum(eqCEC)
     # MATLAB uses the first cell's release for every cell
-    soil["ccateqnatCECrat"] = soil["ccateqnatrelease"][0][None, :] / tCO2ha / eqCEC[:, None]
+    rel = soil["ccateqnatrelease"] if fixed(ds, "cec_ratio_cells") else soil["ccateqnatrelease"][0][None, :]
+    soil["ccateqnatCECrat"] = rel / tCO2ha / eqCEC[:, None]
     units["ccateqnatCECrat"] = "eq eq^{-1}CEC"
     label["ccateqnatCECrat"] = "Ca+Mg+Na+K released from native phases"
     tunits["ccateqnatCECrat"] = "eq eq^{-1}CEC"
@@ -449,8 +455,10 @@ def _getfsrelease(out, ds, ilast, tzero, szero, tCO2ha, CO2lab, cfluxlab):
             soil[c] = soil[c] + diff * st
             total[c] = total[c] + np.sum(diff, axis=0) * st
             soil[f] = soil[f] + soil[kf] * st
-            # MATLAB adds the running cell sum to the total each time
-            total[f] = total[f] + np.sum(soil[f], axis=0)
+            if fixed(ds, "feedstock_remaining"):
+                total[f] = total[f] + np.sum(soil[kf] * st, axis=0)
+            else:  # MATLAB adds the running cell sum to the total each time
+                total[f] = total[f] + np.sum(soil[f], axis=0)
 
     # MATLAB converts these totals to tCO2/ha here and again in cCaMgNarelease below
     for e, fac in (("Ca", 2), ("Mg", 2), ("Na", 1), ("K", 1)):
@@ -459,13 +467,16 @@ def _getfsrelease(out, ds, ilast, tzero, szero, tCO2ha, CO2lab, cfluxlab):
         tlabel[c] = e + " from feedstock"
         tunits[c] = CO2lab
     soil["cCaMgNarelease"] = (soil["cCarelease"] * 2 + soil["cMgrelease"] * 2 + soil["cNarelease"]) * tCO2ha
-    total["cCaMgNarelease"] = (total["cCarelease"] * 2 + total["cMgrelease"] * 2 + total["cNarelease"]) * tCO2ha
+    if fixed(ds, "release_units"):  # the totals are already in tCO2/ha
+        total["cCaMgNarelease"] = total["cCarelease"] + total["cMgrelease"] + total["cNarelease"]
+    else:
+        total["cCaMgNarelease"] = (total["cCarelease"] * 2 + total["cMgrelease"] * 2 + total["cNarelease"]) * tCO2ha
     ys = total.setdefault("yalescale", {})
     ys["cCaMgNarelease"] = 2
     tunits["cCaMgNarelease"] = CO2lab
     tlabel["cCaMgNarelease"] = "Ca+Mg+Na from feedstock"
     label["cCaMgNarelease"] = "Ca+Mg+Na from feedstock"
-    total["ccateqrelease"] = total["cCaMgNarelease"] + total["cKrelease"] * tCO2ha
+    total["ccateqrelease"] = total["cCaMgNarelease"] + total["cKrelease"] * (1 if fixed(ds, "release_units") else tCO2ha)
     soil["ccateqrelease"] = soil["cCaMgNarelease"] + soil["cKrelease"] * tCO2ha
     tunits["ccateqrelease"] = CO2lab
     tlabel["ccateqrelease"] = "Ca+Mg+Na+K released from feedstock"
@@ -473,7 +484,8 @@ def _getfsrelease(out, ds, ilast, tzero, szero, tCO2ha, CO2lab, cfluxlab):
     eqCEC = np.asarray(ds["cell"]["eqCEC"], float).reshape(-1)
     total["ccateqCECrat"] = total["ccateqrelease"] / tCO2ha / np.sum(eqCEC)
     # MATLAB uses the first cell's release for every cell
-    soil["ccateqCECrat"] = soil["ccateqrelease"][0][None, :] / tCO2ha / eqCEC[:, None]
+    rel = soil["ccateqrelease"] if fixed(ds, "cec_ratio_cells") else soil["ccateqrelease"][0][None, :]
+    soil["ccateqCECrat"] = rel / tCO2ha / eqCEC[:, None]
     units["ccateqCECrat"] = "eq eq^{-1}CEC"
     label["ccateqCECrat"] = "Ca+Mg+Na+K released from feedstock"
     tunits["ccateqCECrat"] = "eq eq^{-1}CEC"

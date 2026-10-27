@@ -106,6 +106,29 @@ Plotting code (`getfig`, `show*`, figure scripts) is not ported.
   30 to 124 cm cells). `setup_run(..., legacy_airpor=True)` reproduces the
   published values; the default follows v1.1.
 
+## Fixes
+
+The port reproduces the MATLAB code as written by default, so it can still be
+checked against the published runs. Each bug below that the port reaches has a
+switch in `artemis_p/fixes.py`, turned on through `ds["fixes"]` (in the
+settings passed to `setup_data_struc`):
+
+- `"all"` turns on the clear coding errors (`fixes.CLEAR`);
+- review fixes (`fixes.REVIEW`) change model behaviour in ways the authors
+  should confirm, so they must be named: `("all", "native_rsa_weighting")`.
+
+`out.metadata.fixes` lists the fixes used in a run, and
+`scripts/run_rbcomp.py NDAYS WORKDIR all` compares a fixed run with the
+published one. `tests/test_fixes.py` checks what each fix changes.
+
+Review fixes: `native_rsa_weighting`, `upflow_fractions`,
+`day1_soil_moisture`, `bottom_layer_inflow` (CLM5 has it, but in rBcomp it
+halves the mean water table depth and gives overflow warnings in the Richards
+solver, so the rest of the hydrology may need checking with it) and
+`nfix_flag` (the default `includeNfix=0` would switch off legume N fixation in
+every run). `fillNaN` is fixed unconditionally (the MATLAB errors when it
+reaches the bug). Bugs on paths that are not ported have no switch.
+
 ## Bugs found in the MATLAB code
 
 ### Likely to affect published results

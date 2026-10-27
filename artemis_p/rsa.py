@@ -2,6 +2,8 @@
 
 import numpy as np
 
+from .fixes import enabled as fixed
+
 
 def update_rsa(out, meth, ds, irun, phases):
     """Update ``out['run']['RSA']`` for day ``irun`` (1-based) from the day's
@@ -28,6 +30,11 @@ def update_rsa(out, meth, ds, irun, phases):
             Mratexp = (parm["roughnessfractal"] - 2) / 3
         # MATLAB's per-phase fractal columns are tested with ismember on all
         # the table's variable names, which is never all true, so are never used
+        elif fixed(ds, "fractal_per_phase"):
+            for col, d in (("surfacefractal", 3), ("roughnessfractal", 2)):
+                if col in pt.columns and np.isfinite(pt.loc[ph, col]):
+                    Mratexp = (pt.loc[ph, col] - d) / 3
+                    break
         lam = Mrat ** Mratexp
         if pt.loc[ph, "reversible"]:
             scl = pt.loc[ph, "molmass"] / pt.loc[ph, "G"] / 1e6

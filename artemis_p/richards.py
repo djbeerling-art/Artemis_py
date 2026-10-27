@@ -25,6 +25,8 @@ import math
 
 import numpy as np
 
+from .fixes import enabled as fixed
+
 # CLM5 Technical Note Table 2.3: interface (bottom) and node depths (m)
 CLM5_ZI = np.array([0.01, 0.04, 0.09, 0.16, 0.26, 0.40, 0.58, 0.8, 1.06, 1.36, 1.7, 2.08, 2.5, 2.99, 3.58,
                     4.27, 5.06, 5.95, 6.94, 8.03, 9.795, 13.328, 19.483, 28.871, 41.998])
@@ -77,6 +79,7 @@ class _SoilWaterMovement:
     def __init__(self, ds, c, idx, addice=1, etscale=1.0):
         parm = ds["parm"]
         self.idx = idx  # 1-based day
+        self.fix = {f: fixed(ds, f) for f in ("frost_table", "bottom_layer_inflow", "clm5_layer_overlap")}
         self.addice, self.etscale = addice, etscale
         self.e_ice = parm.get("e_ice", 6.0)
         self.aq_sp_yield_min = parm.get("aq_sp_yield_min", 0.1)
@@ -120,9 +123,13 @@ class _SoilWaterMovement:
                 c["ztop"] = np.r_[c["ztop"], CLM5_ZTOP[wadd]]
                 c["dz"] = np.r_[c["dz"], CLM5_DZ[wadd]]
                 c["zi"] = np.r_[c["zi"], CLM5_ZI[wadd]]
-                # meant for the first added layer, but nlevsoi already includes the added soil layers
-                c["ztop"][nlevsoi] = c["zi"][nlevsoi - 1]
-                c["dz"][nlevsoi] = c["zi"][nlevsoi - 1] - c["ztop"][nlevsoi - 1]
+                if self.fix["clm5_layer_overlap"]:
+                    c["ztop"][nc] = c["zi"][nc - 1]
+                    c["dz"][nc] = c["zi"][nc] - c["ztop"][nc]
+                else:
+                    # meant for the first added layer, but nlevsoi already includes the added soil layers
+                    c["ztop"][nlevsoi] = c["zi"][nlevsoi - 1]
+                    c["dz"][nlevsoi] = c["zi"][nlevsoi - 1] - c["ztop"][nlevsoi - 1]
             c["zmm"], c["zimm"], c["dzmm"] = c["z"] * 1000, c["zi"] * 1000, c["dz"] * 1000
         for k in ("watsat", "hksat", "sucsat", "bsw"):
             if k not in c:
@@ -173,7 +180,8 @@ class _SoilWaterMovement:
             c["h2osoi_ice"] = water * (soiltemp <= 0)
             if addaquifer:
                 fc = np.asarray(cell["fc"], float)
-                c["h2osoi_liq"] = np.r_[c["h2osoi_liq"], np.zeros(nwadd) + fc[-1] * CLM5_DZ[nwadd - 1] * 1000]
+                dzadd = c["dz"][nc:] if self.fix["clm5_layer_overlap"] else CLM5_DZ[nwadd - 1]
+                c["h2osoi_liq"] = np.r_[c["h2osoi_liq"], np.zeros(nwadd) + fc[-1] * dzadd * 1000]
                 if len(wsat) > 0:
                     c["h2osoi_liq"][wsat] = c["watsat"][wsat] * c["dz"][wsat] * 1000
                 c["h2osoi_ice"] = np.r_[c["h2osoi_ice"], np.zeros(nwadd)]
@@ -406,6 +414,8 @@ class _SoilWaterMovement:
             num = (smp[k] - smp[k - 1]) - dzq
             numj[k], denj[k] = num, den
             # MATLAB assigns this to a local qin, so c.qin(nlevsoi) stays 0 below
+            if self.fix["bottom_layer_inflow"]:
+                qin[k] = -hk[k - 1] * num / den
             dqidw0[k] = -(-hk[k - 1] * dsmpdw[k - 1] + num * dhkdw[k - 1]) / den
             dqidw1[k] = -(hk[k - 1] * dsmpdw[k] + num * dhkdw[k - 1]) / den
             den = zmm[k + 1] - zmm[k]
@@ -515,6 +525,11 @@ class _SoilWaterMovement:
         t = c["t_soisno"]
         k_frz = nlevsoi if t[0] > TFRZ else 1
         # the MATLAB loop sets kfrz, not k_frz, so the frost table search has no effect
+        if self.fix["frost_table"]:
+            for k in range(2, nlevsoi + 1):
+                if t[k - 2] > TFRZ and t[k - 1] <= TFRZ:
+                    k_frz = k
+                    break
         frost_table = c["z"][k_frz - 1]
         if not (c["zwt"] < frost_table and t[k_frz - 1] <= TFRZ):
             k_perch = self._perched_level(k_frz)
@@ -733,6 +748,8 @@ def get_rich_quick(ds, addice=1):
         run[k] = np.zeros(n)
     run.setdefault("Sws", np.zeros((nc, n)))
     run.setdefault("Swstot", np.zeros((nc, n)))
+    if fixed(ds, "day1_soil_moisture"):
+        run["Sws"][:, 0] = run["Swstot"][:, 0] = np.asarray(cell["targH2O"], float) / vsoil
     c = None  # getrichquick's own c is not recognised by soilwatermovement
     for i in range(1, n + 1):
         c = soil_water_movement(ds, c, i, addice=addice)

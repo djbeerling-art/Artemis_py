@@ -9,6 +9,8 @@ NotImplementedError.
 
 import numpy as np
 
+from .fixes import enabled as fixed
+
 CEC_OPTS = ("CECSURF", "CECWHAM", "CECcarboxylic")
 BASE_CATIONS = ("ca", "mg", "na", "k")
 
@@ -116,7 +118,7 @@ def cec_sorb(ds, extractable_fe=None):
     cell["CECcmolckgsoil"] = cell["X"] / gsoil * 1000 * 100
     units["CEC"], label["CEC"] = "cmolc kgsoil^{-1}", "Cation exchange capacity"
     # MATLAB: cecsum is still in meq/100g here, so eqCEC is 100x the eq/cell it is labelled as
-    cell["eqCEC"] = cecsum * gsoil / 1000
+    cell["eqCEC"] = cecsum * gsoil / 1000 / (100 if fixed(ds, "eqcec_units") else 1)
     units["eqCEC"], label["eqCEC"] = "eq cell^{-1}", "Cation exchange capacity"
 
     if "gSOC" not in cell and "SOC" in cell:

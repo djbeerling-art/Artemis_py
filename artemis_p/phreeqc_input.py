@@ -21,6 +21,7 @@ from pathlib import Path
 import numpy as np
 
 from . import phreeqc
+from .fixes import active, enabled as fixed
 from .mformat import sprintf
 from .obs import assessrun2
 from .rsa import update_rsa
@@ -360,6 +361,9 @@ class PhreeqcRun:
         scheme["orgrates"] = ["Nhums", "Nhuma", "Phum", "Residue", "Manurefresh"]
         scheme["Nrates"] = ["Nfix", "Nitrification", "Denitrification"]
         # MATLAB builds the list of included rates and then overwrites it with all of them
+        self.withNfix = stg["includeNfix"] or not fixed(ds, "nfix_flag")
+        if not self.withNfix:
+            scheme["Nrates"] = scheme["Nrates"][1:]
         scheme["rates"] = scheme["orgrates"] + scheme["Nrates"]
         scheme["resCNgrat"] = scheme["resCgfrac"] / scheme["resNgfrac"]
         scheme["resCPgrat"] = scheme["resCgfrac"] / scheme["resPgfrac"]
@@ -833,7 +837,7 @@ class PhreeqcRun:
         if stg["includeuptake"] and ds["ETmethod"].lower() == "mixflownut":
             k = 1  # MATLAB tests trnutflag(k) with the cell index left over from the loops above (1)
             for jnut in range(self.nnut):
-                if ds["trnutflag"][k - 1] == 0:
+                if ds["trnutflag"][jnut if fixed(ds, "passive_uptake_flag") else k - 1] == 0:
                     continue
                 f = self.trnutfld[jnut]
                 prev = soil[f][:, i - 2] * self.planted[i - 1] if i > self.istart else 0
@@ -878,6 +882,7 @@ class PhreeqcRun:
         md["runtime"] = sprintf("Runtime for %s (%s, %d warnings): %g minutes", md["runname"], what,
                                 sum(out["run"]["nwarnings"].values()), mins)
         md["dumpfile"] = self.fname + ".dmp"
+        md["fixes"] = active(ds)
         return out
 
     def addtoselectedoutput(self, m):
@@ -901,6 +906,9 @@ class PhreeqcRun:
             if kf not in m:
                 continue
             # only the first species found is used, so k_DINuptake is the nitrate uptake alone
+            if "k_DINuptake" in m and fixed(self.ds, "din_uptake"):
+                m["k_DINuptake"] = m["k_DINuptake"] + m[kf]
+                m["dk_DINuptake"] = m["dk_DINuptake"] + m["d" + kf]
             if "k_DINuptake" not in m:
                 m["k_DINuptake"] = m[kf]
                 m["dk_DINuptake"] = m["d" + kf]
@@ -931,7 +939,10 @@ class PhreeqcRun:
             m["mass_H2O"][w] = 0
         if operc[i - 1] < self.vleachthresh:
             m["pH"][w] = np.nan
-        if run[self.inpercfld][0, i - 1] <= 0:
+        if run[self.inpercfld][0, i - 1] <= 0 and fixed(ds, "leachate_ph"):
+            m["pH"][soln == 0] = np.nan
+            m["mass_H2O"][w] = 0
+        elif run[self.inpercfld][0, i - 1] <= 0:
             # MATLAB writes out.pH (not m.pH), and uses the leachate rows here, not the influent's
             if len(w):
                 pH = out.get("pH", np.zeros(0))
@@ -1168,7 +1179,10 @@ class PhreeqcRun:
             w("    %10s %g charge\n", self.charge0fld, 0.000001)
         w("    %19s %f\n", "C(4) 10 CO2(g)", run["si_CO2atm"][i - 1])
         # MATLAB compares the influent struct with 'pe'/'O2g' (always false), so these are fixed
-        w("    %10s %d O2(g) %f\n", "pe", 12.5, -0.677778)
+        if fixed(ds, "influent_redox"):
+            w("    %10s %g O2(g) %f\n", "pe", ds["influent"].get("pe", 12.5), ds["influent"].get("O2g", -0.677778))
+        else:
+            w("    %10s %d O2(g) %f\n", "pe", 12.5, -0.677778)
         w("    %10s %f\n", "temp", run["airtemp"][i - 1])
         if includetracer:
             w("    %10s %g %s # Same concentration as Cl\n", "Tracer", ds["influent"]["msp"]["Cl"], "")
@@ -1559,7 +1573,7 @@ class PhreeqcRun:
         if self.decompscheme.lower() == "swat":
             if stg["includeNkinetics"]:
                 # MATLAB tests isfield(out,'k_Nhuma') (not out.soil), so pctorgC keeps its initial value
-                if nout > 0 and "k_Nhuma" in out:
+                if nout > 0 and "k_Nhuma" in (soil if fixed(ds, "pctorgc_update") else out):
                     scheme["pctorgC"][K, I] = (ds["pt2"]["C"]["molmass"] * cell["gSOC"][K] / cell["gSON"][K]
                                                * (soil["k_Nhums"][K, I - 1] + soil["k_Nhuma"][K, I - 1])
                                                / cell["gsoil"][K] * 100)
@@ -1572,7 +1586,7 @@ class PhreeqcRun:
                       scheme["pctorgC"][K, I])
                 w("    -component %s\n", "Nitrification")
                 w("    %14s %f %f\n", "-d_params", scheme["etaSW"][K, I], scheme["etamidz"][K])
-                if stg["includeuptake"]:
+                if stg["includeuptake"] and self.withNfix:
                     w("    -component %s\n", "Nfix")
                     if self.planted[I] == 0:
                         w("    %14s 0\n", "-m")
@@ -1658,6 +1672,8 @@ class PhreeqcRun:
                   run["cellcuptake"][n][K, I] / targ)
                 w("    %10s %g \n", "-tol", tol)
             # Ammuptake uses the Michaelis-Menten index left over from the last nutrient
+            if fixed(ds, "amm_uptake_mm_row"):
+                ind = int(max(run["Nindex"][I], 1))
             Ammdemand = run["cellcuptake"]["N"][K, I] / targ * stg["includeAmmuptake"]
             w("Ammuptake\n")
             if stg["nocounterion"]:
@@ -1687,7 +1703,7 @@ class PhreeqcRun:
                 w("    %10s 0\n", "-m0")
                 w("    %10s %f %f\n", "-parms", scheme["etaSW"][K, I], scheme["etamidz"][K])
                 w("    %10s %g \n", "-tol", tol)
-            if stg["includeNkinetics"] and stg["includeuptake"]:
+            if stg["includeNkinetics"] and stg["includeuptake"] and self.withNfix:
                 w("Nfix\n")
                 w("    %10s %f %s %f\n", "-formula H", -stg["Nfixprotons"], "Br", -stg["Nfixprotons"])
                 w("    %10s 0\n", "-m")

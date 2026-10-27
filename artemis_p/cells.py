@@ -9,6 +9,7 @@ import copy
 
 import numpy as np
 
+from .fixes import enabled as fixed
 from .phasetable import check_phase_type
 
 MODNAME = {
@@ -300,8 +301,8 @@ def pedotransfer(ds, sandpct=None, claypct=None, ptran="Cosby5", include_om=True
 def setup_soil_phases(ds):
     """setupsoilphases.m: native mineral moles and reactive surface areas per cell.
 
-    MATLAB note (bug kept for now): the RSA of each mineral uses the mass of
-    all soil minerals, not the mineral's own share. See docs/PORTING_PLAN.md.
+    MATLAB note: the RSA of each mineral uses the mass of all soil minerals,
+    not the mineral's own share (fix ``native_rsa_weighting``). See docs/PORTING_PLAN.md.
     """
     t = ds["phasetable"]
     if "category" not in t:
@@ -377,4 +378,6 @@ def setup_soil_phases(ds):
         mass = pmd.sum(axis=1) * prop[ph]
         moles[ph] = mass / molmass[m]
         rsa[ph] = rsad.sum(axis=1) * native_rsa_scale
+        if fixed(ds, "native_rsa_weighting"):
+            rsa[ph] = rsa[ph] * prop[ph]
     return ds

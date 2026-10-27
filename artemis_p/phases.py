@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 
 from .csvdata import read_csv_data
+from .fixes import enabled as fixed
 from .formula import hydrate_to_formula, parse_formula
 from .phasetable import check_phase_type
 
@@ -47,6 +48,9 @@ def setup_phases(ds, basedir=None):
         print("(setupphases) No feedstock names given, returning")
         return ds
     _init_phase_mol_arrays(ds)
+    if fixed(ds, "hornblende_formula") and "formula" in ds["phasetable"]:
+        f = ds["phasetable"]["formula"]
+        ds["phasetable"]["formula"] = f.where(f != "Ca2Mg52Si8O22(OH)2", "Ca2Mg5Si8O22(OH)2")
     _set_stoichiometry(ds)
     _prepare_tables(ds, afracfld)
     _check_timetable(ds)
@@ -181,8 +185,9 @@ def _prepare_tables(ds, afracfld):
             fstable["rho_kgm3"] = fstable["totG"]
         elif re.search(r"g[/\s]*cm", gunits):
             # MATLAB divides by 1000 here; g/cm3 to kg/m3 is x1000 (see PORTING_PLAN)
-            t["rho_kgm3"] = t["G"] / 1000
-            fstable["rho_kgm3"] = fstable["totG"] / 1000
+            scl = 1000 if fixed(ds, "density_units") else 1 / 1000
+            t["rho_kgm3"] = t["G"] * scl
+            fstable["rho_kgm3"] = fstable["totG"] * scl
     ds["phasetable"], ds["feedstocktable"] = t, fstable
 
 
@@ -406,7 +411,11 @@ def _set_rsa(ds, afracfld):
     if bet is None and geo is not None:
         bet = lam * geo
     elif bet is not None and geo is None:
-        geo = lam * bet  # MATLAB: lambda = BET/geo, so this should be BET/lambda
+        if fixed(ds, "geo_from_lambda"):
+            with np.errstate(divide="ignore", invalid="ignore"):
+                geo = np.where(lam > 0, bet / lam, 0.01)
+        else:
+            geo = lam * bet  # MATLAB: lambda = BET/geo, so this should be BET/lambda
     if bet is None:
         bet = np.ones(nfs)
     if geo is None:

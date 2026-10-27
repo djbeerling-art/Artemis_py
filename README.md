@@ -28,6 +28,13 @@ export ARTEMIS_FLANAGAN=/path/to/examples/EF_CLM5/Flanagan_BlueRidge_PHASESRATES
 pytest
 ```
 
+## Bug fixes
+
+By default the port keeps the MATLAB code's bugs, so its output matches the
+published runs. Set `ds["fixes"] = "all"` in the settings to fix the clear
+coding errors; see the Fixes section of
+[docs/PORTING_PLAN.md](docs/PORTING_PLAN.md) and `artemis_p/fixes.py`.
+
 ## Status
 
 - [x] PHREEQC runner, selected-output reader, MATLAB `.mat` reference loader

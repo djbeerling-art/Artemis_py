@@ -17,6 +17,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .fixes import enabled as fixed
+
 
 def _days_in_year(y):
     return 366 if (y % 4 == 0 and (y % 100 != 0 or y % 400 == 0)) else 365
@@ -123,6 +125,8 @@ def read_timeseries(ds, fname, keepmonthly=False):
         nlay = int(re.match(r"nlay=(\d+)", ucell[i0]).group(1))
         # MATLAB tests numel(contains(ucell,'cm')), which is always true, so depths are always taken as cm
         depth = np.array([float(re.match(r"\s*([-\d.eE+]+)", ucell[i0 + 1 + i]).group(1)) for i in range(nlay)])
+        if fixed(ds, "depth_units"):
+            depth = depth * np.array([depth_scale(ucell[i0 + 1 + i]) for i in range(nlay)])
         array = np.vstack([cols[names[i0 + 1 + i]] for i in range(nlay)])
         stem = Path(fname).stem
         if "_timeseries_" in stem:
@@ -161,6 +165,13 @@ def read_timeseries(ds, fname, keepmonthly=False):
                 provided[n] = str(fname)
     ds.setdefault("inputfiles", []).append(str(fname))
     return ds
+
+
+def depth_scale(label):
+    """Factor converting a depth label's units ('10 - 20 cm', '0.1 m', '100mm') to cm."""
+    u = re.findall(r"[A-Za-z]+", str(label))
+    u = u[-1].lower() if u else "cm"
+    return {"cm": 1.0, "mm": 0.1, "m": 100.0}.get(u, 1.0)
 
 
 def _julian_date(dt):

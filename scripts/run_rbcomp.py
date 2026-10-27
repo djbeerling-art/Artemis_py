@@ -1,6 +1,9 @@
 """Run the rBcomp reference case and compare it with the authors' saved MATLAB run.
 
-Usage: python scripts/run_rbcomp.py NDAYS WORKDIR
+Usage: python scripts/run_rbcomp.py NDAYS WORKDIR [FIXES]
+
+FIXES is a comma-separated list for ``ds['fixes']`` (e.g. ``all`` or
+``all,native_rsa_weighting``); with fixes the comparison shows their effect.
 
 Needs ARTEMIS, ARTEMIS_PHREEQC (and ARTEMIS_FLANAGAN if used) as for the tests.
 The day timestamps come from the saved run so that the last day's ``.in`` can be
@@ -23,6 +26,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests"))
 
 from test_inputs import RBCOMP, _rbcomp_setup  # noqa: E402
 
+from artemis_p.preprocess import setup_data_struc  # noqa: E402
+from artemis_p.reference import EF2_FILES, ef2_resolver, rbcomp_settings  # noqa: E402
+from artemis_p.setuprun import complete_setup  # noqa: E402
+
 from artemis_p import matref, phreeqc  # noqa: E402
 from artemis_p.phreeqc_input import PhreeqcRun  # noqa: E402
 from artemis_p.reference import AUTHOR_DBDIR, AUTHOR_OUTDIR, rbcomp_run_settings, stage_ef2_dir  # noqa: E402
@@ -42,12 +49,18 @@ def compare(grp, ours, ref, ndays, tol=1e-3):
             print(f"{grp:9s} {f:24s} max rel diff {np.nanmax(rel):.3g}, {(rel > tol).sum()}/{rel.size} values")
 
 
-def main(ndays, work):
+def main(ndays, work, fixes=None):
     saved = matref.load_run(Path(os.environ["ARTEMIS_PHREEQC"]) / f"{RBCOMP}.mat")
     artemis = Path(os.environ["ARTEMIS"])
     dbdir = f"{artemis / 'phreeqcdbincludefiles'}/"
     ef2 = stage_ef2_dir(work, artemis, os.environ.get("ARTEMIS_FLANAGAN"))
-    ds = copy.deepcopy(_rbcomp_setup())
+    if fixes:
+        settings = rbcomp_settings()
+        settings["fixes"] = tuple(fixes.split(","))
+        resolve, ef2dir = ef2_resolver()
+        ds = complete_setup(setup_data_struc(settings, EF2_FILES, resolve, basedir=ef2dir), legacy_airpor=True)
+    else:
+        ds = copy.deepcopy(_rbcomp_setup())
     ds.update(rbcomp_run_settings(dbdir=dbdir, outdir=f"{ef2}/"))
 
     def stamp(i):
@@ -89,4 +102,4 @@ def main(ndays, work):
 
 
 if __name__ == "__main__":
-    main(int(sys.argv[1]), Path(sys.argv[2]))
+    main(int(sys.argv[1]), Path(sys.argv[2]), sys.argv[3] if len(sys.argv) > 3 else None)
