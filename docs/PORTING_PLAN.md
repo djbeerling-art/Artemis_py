@@ -38,7 +38,7 @@ Plotting code (`getfig`, `show*`, figure scripts) is not ported.
    `readtimetable`, `readinitlayerdata`, `readobsdata`, `getscreenedtable`,
    `getphasetable`, `getperiodictable`, `setmodelspecies`, `getdecyear`.
    Checked against `ds.timetable`, `ds.layer`, `ds.phasetable` in the `.mat`.
-3. **Soil, phases and chemistry setup (~4,000 lines; in progress: `getcellsfromlayers`, `setupsoilphases`, `pedotransfer`, full `checkphasetype`, `setsoiltexture`, `CECsorb` done).** `setupphases`,
+3. **Soil, phases and chemistry setup (~4,000 lines; in progress: `getcellsfromlayers`, `setupsoilphases`, `pedotransfer`, full `checkphasetype`, `setsoiltexture`, `CECsorb`, `processtimetable`, `getfert` done).** `setupphases`,
    `setupsoilphases`, `checkphasetype`, `implicitcalc`, `getcellsfromlayers`,
    `pedotransfer`, `markPSDinit`, `getRosinRammlerPSD`, `setnucSA`,
    `setstoichiometry`, `CECsorb`, `Cerling1991`, `getfert`, `setupnutuptake`,
@@ -63,6 +63,10 @@ Plotting code (`getfig`, `show*`, figure scripts) is not ported.
   same echoed input.
 - The published outputs were made with PHREEQC 3.7.3. PHREEQC 3.8.6 and
   3.9.0 differ by up to 0.008 pH from the first kinetic step onward.
+- `examples/EF2/Pellets.RATES` defines the rate law for `CaCO3_trmt`, not
+  `UAN28`, so it is left over from another run. The published rBcomp `.out`
+  echoes a UAN28 version, which the port rebuilds from `Pellets.dat`
+  (`treatments.treatment_rates_text`) and matches.
 
 ## Bugs found in the MATLAB code
 
@@ -144,6 +148,12 @@ flagged here to fix once the port is verified.
   taken as `moles/100*55.85/molmass`, which treats a mole amount as a soil mass
   percent. EF has no native FeOOH phase, so it falls back to 2.79 mg Fe/g soil
   and is unaffected.
+- **Stale treatment RATES files (`setupdatastruc.m` `processtimetable`).**
+  With the default `writetrRATESfiles=0`, an existing `Pellets.RATES` in the
+  run directory is reused without checking which treatments it defines. A
+  file left by an earlier run with other fertilisers is silently used, and
+  PHREEQC then has no rate law for the new treatment (the archived EF2 copy
+  is an example of such a leftover).
 - **CEC scaling ignored (`CECsorb.m`).** If `ds.scale` exists without a `CEC`
   field (EF has `ds.scale.pCO2g`), `parm.CECscl` is ignored.
 

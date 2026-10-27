@@ -11,6 +11,7 @@ import shutil
 from pathlib import Path
 
 from . import phreeqc
+from .treatments import treatment_rates_text
 from .selected_output import compare_sel
 
 AUTHOR_OUTDIR = "/mnt/parscratch/users/bo1llt//EF2//"
@@ -29,8 +30,12 @@ def artemis_root():
     return Path(root)
 
 
-def stage_init_run(name, phreeqc_dir, workdir, artemis=None, flanagan=None):
+def stage_init_run(name, phreeqc_dir, workdir, artemis=None, flanagan=None, pellets=("UAN28",)):
     """Copy ``<name>.in_init`` into ``workdir/EF2`` with paths rewritten.
+
+    ``Pellets.RATES`` is rebuilt from ``Pellets.dat`` for the ``pellets``
+    treatments, because the copy in the v1.1 archive (examples/EF2) was written
+    for a different run (CaCO3_trmt).
 
     Returns the path of the staged .in file.
     """
@@ -39,7 +44,8 @@ def stage_init_run(name, phreeqc_dir, workdir, artemis=None, flanagan=None):
     ef2 = workdir / "EF2"
     ef2.mkdir(parents=True, exist_ok=True)
     (workdir / "EF_CLM5").mkdir(exist_ok=True)
-    shutil.copy(artemis / "examples" / "EF2" / "Pellets.RATES", ef2)
+    (ef2 / "Pellets.RATES").write_text(
+        treatment_rates_text(artemis / "phreeqcdbincludefiles", "Pellets", list(pellets)))
     flanagan = Path(flanagan) if flanagan else artemis / "examples" / "EF_CLM5" / FLANAGAN
     if flanagan.exists():
         shutil.copy(flanagan, workdir / "EF_CLM5" / FLANAGAN)

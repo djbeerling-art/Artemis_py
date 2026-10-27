@@ -203,3 +203,35 @@ def test_cec_sorb():
     assert cell["units"]["surface"] == {k: v for k, v in rcell["units"]["surface"].items() if k in cell["units"]["surface"]}
     wham = ref_ds()["parm"]["WHAM"]
     assert ds["parm"]["WHAM"] == {k: (int(v) if isinstance(v, float) else v) for k, v in wham.items()}
+
+
+def test_process_timetable(tmp_path):
+    from artemis_p.forcing import set_run_time_arrays
+    from artemis_p.timetable import read_timetable
+    from artemis_p.treatments import process_timetable, write_treatment_rates
+
+    root = Path(os.environ["ARTEMIS"])
+    ds = {"parm": {"fsname": "Blueridge", "writetrRATESfiles": 0}, "dbdir": root / "phreeqcdbincludefiles"}
+    ds = set_run_time_arrays(ds, "2015-01-01", "2020-12-31")
+    ds = read_timetable(ds, root / "examples" / "EF_data" / "EF_maize_B0_timetable.csv")
+    ds = process_timetable(ds)
+    ref = ref_ds()
+    tt, rtt = ds["timetable"], ref["timetable"]
+    for k in ("runindex", "molpm2", "molmass", "formula", "treatment", "dosage"):
+        assert matref.differences(tt[k], rtt[k], k, rtol=1e-12) == [], k
+    assert ds["treatments"] == [ref["treatments"]]
+    assert ds["INCLUDE"] == [ref["INCLUDE"]]
+    rft = ref["ferttable"]
+    for k in ("treatment", "PHREEQCformula", "molmass", "ttindex"):
+        assert matref.differences(ds["ferttable"][k], rft[k], k, rtol=1e-12) == [], k
+    # The archived examples/EF2/Pellets.RATES was written for another run
+    # (CaCO3_trmt), so check against the copy PHREEQC echoed in the rBcomp .out.
+    (path,) = write_treatment_rates(ds, tmp_path)
+
+    def norm(lines):
+        return [x for x in (ln.split("#")[0].strip().lstrip("-") for ln in lines) if x and x != "RATES"]
+
+    mine = norm(path.read_text().splitlines())
+    out = (Path(os.environ["ARTEMIS_PHREEQC"]) / f"{RBCOMP}.out").read_text(encoding="latin-1").splitlines()
+    i = next(k for k, ln in enumerate(out) if "UAN28 # Slow-release" in ln)
+    assert mine == norm(out[i:i + 200])[:len(mine)]
