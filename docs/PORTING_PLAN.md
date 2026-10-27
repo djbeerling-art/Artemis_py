@@ -52,9 +52,16 @@ Plotting code (`getfig`, `show*`, figure scripts) is not ported.
    `SWATsnow`, `potET`, `getsoilCO2g`, `getsoilresp`, `setmixfracs2`,
    `bucket`, `getrichquick`, `soilwatermovement`, `drainrate`. Checked against
    `ds.run` (mixing fractions, temperatures, CO2).
-5. **PHREEQC input writer (part of `getphreeqcrun`, 3,846 lines).** Day-1
-   inputs must match every published `.in_init`, apart from paths and
-   timestamps.
+5. **PHREEQC input writer (part of `getphreeqcrun`, 3,846 lines; done for
+   day 1: `artemis_p.phreeqc_input.PhreeqcRun` ports the settings,
+   `getsettings`, `setoptions`, `decompsetup`, `setmetadata`/`setruninfo`,
+   `setfilename`, `gasmoles` and the day-1 writers. With the authors' paths
+   and timestamp, the rBcomp day-1 input is byte-identical to the published
+   `.in_init`, and PHREEQC 3.7.3 reproduces `.sel_init` from it. MATLAB's
+   `sprintf` quirks are in `artemis_p.mformat`. Not yet: `updatesoilcells` and
+   `KINETICS_MODIFY` for later days, which belong with stage 6. Porting this
+   stage also added the harvest-residue step at the end of `setupdatastruc`
+   (`setuprun.set_residues`).)**
 6. **Driver loop (~2,500 lines).** The rest of `getphreeqcrun`, plus
    `getselectedoutput`, `reshapeselectedoutput`, `updateRSA`, `gasmoles`,
    `assessrun2`, `gettotalfields`, `assessuptake`, `etaRH`, `getbasesatpct`,
@@ -87,6 +94,14 @@ Plotting code (`getfig`, `show*`, figure scripts) is not ported.
 ## Bugs found in the MATLAB code
 
 ### Likely to affect published results
+
+- **Crop-specific uptake constants are never used (`setupnutuptake.m`).**
+  `ds.run.crop` holds lower-case names (`maize`, `soybean`) but
+  `MMuptakeparams.csv` uses `Maize`, `Soybean`, and the match is a
+  case-sensitive `strcmp`. No crop row ever matches, so every nutrient on every
+  day uses the default row (Km 2.5e-5, cmin 2e-6 mol/L) instead of, for maize,
+  Km 1.4e-5 for K or 0.015 for Cl. In the saved rBcomp `ds`, every
+  `run.<nut>index` is 0 or 1.
 
 - **Native mineral surface area ignores mineral abundance (`setupsoilphases.m`).**
   `RSAD = PMD./psdthresh./1000./G(m).*6` uses the mass of *all* soil
@@ -237,6 +252,36 @@ flagged here to fix once the port is verified.
   `p.SL=p.phi0.*...` uses the whole `phi0` row with day `i`'s `cdepth` and
   `Dsoil`, so only the last day's values survive. `SL` is only used when
   `correctforfinitesoildepth` is set.
+- **Exchange species order changes after day 1 (`getphreeqcrun.m`
+  `writeselectedoutput`).** The sorted list of exchange species is only built
+  while `ds.cell.exchfld` is missing, i.e. on the first day. Later days write
+  the unsorted default list, so the `m_*X*` columns of `.sel` come in a
+  different order from day 2 (the published last-day `.in` shows this).
+  Harmless if the output is read by column name.
+- **Influent pe and O2(g) cannot be set (`writeinfluent`).**
+  `strcmpi(ds.influent,'pe')` compares the struct itself with a string, which
+  is always false, so `ds.influent.pe` and `ds.influent.O2g` are ignored and
+  12.5 and -0.677778 are always written. The fallback branch for a missing
+  `ds.run.influent` also reads `ds.influent.msp.(sp{ii})` (soil solutes)
+  instead of `spi{ii}`; `setoptions` always creates `ds.run.influent`, so it
+  is never reached.
+- **Ammonium uptake uses the last nutrient's Michaelis-Menten row
+  (`writekinetics`).** `Ammuptake` is written with `Km(ind)` and `cmin(ind)`
+  left over from the nutrient loop, i.e. the row for Cl, not N. No effect in
+  rBcomp, where every nutrient uses the default row (see the crop-name issue
+  above).
+- **`Nfix` is always in the rate list (`decompsetup`).** `scheme.rates` is
+  built from the included processes and then overwritten with all of them,
+  so `includeNfix=0` has no effect: Nfix still appears in
+  `-kinetic_reactants` and (when uptake and N kinetics are on) in KINETICS.
+- **Array `||`/`&&` in `setoptions`.** Excluding native phases
+  (`'nonative'`) applies `||` to table columns, and the manure formula applies
+  `&&` to day arrays; both raise errors in MATLAB if reached. The port uses
+  elementwise operators.
+- **Residue and manure formulas use one year's nutrient ratios
+  (`setoptions`).** The authors note this stopgap: the loop index `i` is set to
+  the first day with residue, and that year's mean nutrient ratios are used
+  for the whole run.
 - **CEC scaling ignored (`CECsorb.m`).** If `ds.scale` exists without a `CEC`
   field (EF has `ds.scale.pCO2g`), `parm.CECscl` is ignored.
 

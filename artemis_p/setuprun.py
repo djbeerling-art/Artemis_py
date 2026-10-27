@@ -312,8 +312,24 @@ def setup_nut_uptake(ds, usecrop=None):
     return ds
 
 
+def set_residues(ds):
+    """setupdatastruc.m after setupnutuptake: crop residues and root residues left at harvest."""
+    run, cell, parm = ds["run"], ds["cell"], ds["parm"]
+    till = np.asarray(cell["tillagefrac"])
+    if parm.get("usemeanforcings") == 1 and "peaktot" in run:
+        zero = np.zeros((ds["ncells"], ds["nrun"]))
+        run["rootresidue"] = zero + np.mean(run["peakroot"]) * run["cellup"]
+        run["residue"] = zero + max(0, np.mean(run["peaktot"] - run["harvest"] - run["peakroot"])) * till[:, None]
+    else:
+        w = np.flatnonzero(np.asarray(run["harvest"]) > 0)
+        if len(w):
+            run["rootresidue"][:, w] = run["rootmass"][w] * run["cellup"][:, w]
+            run["residue"][:, w] = np.maximum(0, run["totmass"][w] - run["harvest"][w] - run["rootmass"][w]) * till[:, None]
+    return ds
+
+
 def complete_setup(ds, legacy_airpor=False):
-    """The end of setupdatastruc.m: setuprun then setupnutuptake."""
+    """The end of setupdatastruc.m: setuprun, setupnutuptake and the harvest residues."""
     ds.setdefault("units", {"mmscl": "L", "scl": "m^{-2}land"})  # defaultsettings: ds.mmscl, ds.scl
     ds = setup_run(ds, legacy_airpor=legacy_airpor)
-    return setup_nut_uptake(ds)
+    return set_residues(setup_nut_uptake(ds))

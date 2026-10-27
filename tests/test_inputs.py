@@ -376,7 +376,8 @@ def test_soil_gases_and_nutrients():
     ds, ref = _rbcomp_setup(), ref_ds()
     run, rrun = ds["run"], ref["run"]
     for k in ("airpor", "trueairpor", "impermeabledepth", "cdepth", "phi0", "Sz11", "C1", "pCO2g", "si_CO2g",
-              "soilCO2gppmV", "pO2g", "si_O2g", "Nindex", "Pindex", "Kindex", "Caindex", "Clindex", "Feindex"):
+              "soilCO2gppmV", "pO2g", "si_O2g", "Nindex", "Pindex", "Kindex", "Caindex", "Clindex", "Feindex",
+              "residue", "rootresidue"):
         assert matref.differences(run[k], rrun[k], k, rtol=1e-9, atol=1e-14) == [], k
     for k in ("pO2g", "si_O2g"):
         assert matref.differences(ds["cell"][k], ref["cell"][k], k) == [], k
@@ -394,3 +395,36 @@ def test_airpor_v11():
     assert np.allclose(run["airpor"], np.asarray(ds["cell"]["por"])[:, None] - run["Sws"])
     assert "trueairpor" not in run
     assert (run["pCO2g"] >= _rbcomp_setup()["run"]["pCO2g"] - 1e-15).all()
+
+
+def test_day1_phreeqc_input(tmp_path):
+    """getphreeqcrun's first daily input reproduces the published .in_init, and PHREEQC 3.7.3
+    gives the published .sel_init from it."""
+    import copy
+    import datetime
+
+    from artemis_p import phreeqc
+    from artemis_p.phreeqc_input import PhreeqcRun
+    from artemis_p.reference import rbcomp_run_settings, stage_init_run
+    from artemis_p.selected_output import compare_sel
+
+    ds = copy.deepcopy(_rbcomp_setup())
+    ds.update(rbcomp_run_settings())
+    r = PhreeqcRun(ds, now=datetime.datetime(2026, 6, 3, 15, 17, 52))
+    text = r.write_input(1)
+    phreeqc_dir = Path(os.environ["ARTEMIS_PHREEQC"])
+    assert text == (phreeqc_dir / f"{RBCOMP}.in_init").read_text()
+    assert r.fname.endswith(RBCOMP)
+
+    try:
+        exe = phreeqc.find_phreeqc()
+    except FileNotFoundError:
+        pytest.skip("PHREEQC not available")
+    infile = stage_init_run(RBCOMP, phreeqc_dir, tmp_path, text=text, flanagan=os.environ.get("ARTEMIS_FLANAGAN"))
+    res = phreeqc.run(infile, Path(os.environ["ARTEMIS"]) / "phreeqcdbincludefiles" / "THAmmOrgAlP.dat", exe=exe)
+    assert res.ok, res.errors
+    cmp = compare_sel(infile.with_suffix(".sel"), phreeqc_dir / f"{RBCOMP}.sel_init")
+    # Anatase sits at saturation and flips between present and absent (see test_reference)
+    close = cmp.drop(index=[c for c in ("Anatase", "d_Anatase", "AnataseRLBT", "d_AnataseRLBT") if c in cmp.index])
+    assert close.loc["pH", "max_abs"] < 1e-5
+    assert close["max_abs"].max() < 1e-3

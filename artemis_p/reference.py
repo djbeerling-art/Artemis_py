@@ -30,12 +30,14 @@ def artemis_root():
     return Path(root)
 
 
-def stage_init_run(name, phreeqc_dir, workdir, artemis=None, flanagan=None, pellets=("UAN28",)):
+def stage_init_run(name, phreeqc_dir, workdir, artemis=None, flanagan=None, pellets=("UAN28",), text=None):
     """Copy ``<name>.in_init`` into ``workdir/EF2`` with paths rewritten.
 
     ``Pellets.RATES`` is rebuilt from ``Pellets.dat`` for the ``pellets``
     treatments, because the copy in the v1.1 archive (examples/EF2) was written
     for a different run (CaCO3_trmt).
+
+    ``text`` replaces the published input (e.g. one written by the Python port).
 
     Returns the path of the staged .in file.
     """
@@ -49,7 +51,8 @@ def stage_init_run(name, phreeqc_dir, workdir, artemis=None, flanagan=None, pell
     flanagan = Path(flanagan) if flanagan else artemis / "examples" / "EF_CLM5" / FLANAGAN
     if flanagan.exists():
         shutil.copy(flanagan, workdir / "EF_CLM5" / FLANAGAN)
-    text = (Path(phreeqc_dir) / f"{name}.in_init").read_text()
+    if text is None:
+        text = (Path(phreeqc_dir) / f"{name}.in_init").read_text()
     text = phreeqc.relocate_input(text, {
         AUTHOR_OUTDIR: f"{ef2}/",
         AUTHOR_DBDIR: f"{artemis / 'phreeqcdbincludefiles'}/",
@@ -95,6 +98,21 @@ def ef2_resolver(artemis=None):
         return (ef2 / f).resolve() if not Path(f).is_absolute() else Path(f)
 
     return resolve, ef2
+
+
+RBCOMP_PHREEQCBLOCK = ("SOLUTION_SPECIES; H2O + 0.01e- = H2O-0.01; log_k -9.0; KNOBS; -convergence_tolerance 1e-7; "
+                       "-tolerance 1e-14; -step_size 10.; -diagonal_scale true; -iterations 200; -pe_step_size 5.;")
+
+
+def rbcomp_run_settings(dbdir=AUTHOR_DBDIR, outdir=AUTHOR_OUTDIR[:-1]):
+    """The ds fields from EF2 defaultsettings.m and EFrunsettings2.m that getphreeqcrun reads
+    for rBcomp. The defaults are the authors' paths, as written into the published inputs
+    (getphreeqcrun adds a slash to outdir)."""
+    dbdir = str(dbdir)
+    return {"runname": "rBcomp", "runlab": "{\\bf BR}+UAN28+uptake+sorption", "dbdir": dbdir,
+            "dbfile": "THAmmOrgAlP.dat", "plantratesfile": dbdir + "plantRATES5",
+            "schemeratesfile": dbdir + "SWATRATESPHASEStunable", "outdir": str(outdir),
+            "phreeqcblock": RBCOMP_PHREEQCBLOCK}
 
 
 def rbcomp_settings(artemis=None):
