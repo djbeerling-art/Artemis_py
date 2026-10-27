@@ -152,6 +152,7 @@ class PhreeqcRun:
     def __init__(self, ds, now=None, **opts):
         self.ds = ds
         self.tv = TableValues()
+        self.engine = None  # artemis_p.iphreeqc.Engine when engine="iphreeqc"
         self.now = now or _dt.datetime.now()
         self.stg = default_settings()
         self.scheme = default_scheme()
@@ -257,9 +258,10 @@ class PhreeqcRun:
                 stg[k] = v
             elif k == "nyears":
                 stg["ndays"] = 365 * v
-            elif k in ("printoutput", "cellworkers"):
+            elif k in ("printoutput", "cellworkers", "engine"):
                 # port options: printoutput=0 keeps only warnings and errors in the .out file;
-                # cellworkers>1 runs the cells' kinetics in parallel (phreeqc.run_cells_parallel)
+                # cellworkers>1 runs the cells' kinetics in parallel; engine="iphreeqc" keeps the
+                # PHREEQC state in memory (artemis_p.iphreeqc) instead of running the executable
                 stg[k] = v
             elif k == "runname":
                 self.runname = v
@@ -845,7 +847,13 @@ class PhreeqcRun:
         infile = fname.with_name(fname.name + ".in")
         infile.write_text(text)
         runner = phreeqc.run
-        if stg.get("cellworkers", 1) > 1:
+        if stg.get("engine", "exe") == "iphreeqc":
+            if self.engine is None:
+                from .iphreeqc import Engine
+                self.engine = Engine(self.dbfile, workers=stg.get("cellworkers", 1),
+                                     printoutput=bool(stg.get("printoutput", 1)))
+            runner = self.engine
+        elif stg.get("cellworkers", 1) > 1:
             runner = partial(phreeqc.run_cells_parallel, workers=stg["cellworkers"])
         res = runner(infile, self.dbfile, outfile=fname.with_name(fname.name + ".out"),
                      screenout=fname.with_name(fname.name + ".screenout"), exe=exe, cwd=cwd)
@@ -913,6 +921,10 @@ class PhreeqcRun:
         md["runtime"] = sprintf("Runtime for %s (%s, %d warnings): %g minutes", md["runname"], what,
                                 sum(out["run"]["nwarnings"].values()), mins)
         md["dumpfile"] = self.fname + ".dmp"
+        if self.engine is not None:  # the state was in memory: write the dump a restart reads
+            self.engine.write_dump(md["dumpfile"])
+            self.engine.close()
+            self.engine = None
         md["fixes"] = active(ds)
         return out
 

@@ -1,9 +1,11 @@
 """Run the rBcomp reference case and compare it with the authors' saved MATLAB run.
 
-Usage: python scripts/run_rbcomp.py NDAYS WORKDIR [FIXES]
+Usage: python scripts/run_rbcomp.py NDAYS WORKDIR [FIXES [OPTIONS]]
 
 FIXES is a comma-separated list for ``ds['fixes']`` (e.g. ``all`` or
-``all,native_rsa_weighting``); with fixes the comparison shows their effect.
+``all,native_rsa_weighting``; ``none`` for the published code); with fixes the
+comparison shows their effect. OPTIONS are PhreeqcRun options, e.g.
+``engine=iphreeqc,cellworkers=4,printoutput=0`` for the fast in-memory engine.
 
 Needs ARTEMIS, ARTEMIS_PHREEQC (and ARTEMIS_FLANAGAN if used) as for the tests.
 The day timestamps come from the saved run so that the last day's ``.in`` can be
@@ -49,12 +51,12 @@ def compare(grp, ours, ref, ndays, tol=1e-3):
             print(f"{grp:9s} {f:24s} max rel diff {np.nanmax(rel):.3g}, {(rel > tol).sum()}/{rel.size} values")
 
 
-def main(ndays, work, fixes=None):
+def main(ndays, work, fixes=None, options=None):
     saved = matref.load_run(Path(os.environ["ARTEMIS_PHREEQC"]) / f"{RBCOMP}.mat")
     artemis = Path(os.environ["ARTEMIS"])
     dbdir = f"{artemis / 'phreeqcdbincludefiles'}/"
     ef2 = stage_ef2_dir(work, artemis, os.environ.get("ARTEMIS_FLANAGAN"))
-    if fixes:
+    if fixes and fixes != "none":
         settings = rbcomp_settings()
         settings["fixes"] = tuple(fixes.split(","))
         resolve, ef2dir = ef2_resolver()
@@ -67,7 +69,12 @@ def main(ndays, work, fixes=None):
         s = saved["run"]["current"][i - 1].split("starting: ")[1]
         return datetime.datetime.strptime(s, "%d-%b-%Y %H:%M:%S")
 
-    r = PhreeqcRun(ds, now=stamp(1))
+    opts = {}
+    for kv in (options or "").split(","):
+        if kv:
+            k, v = kv.split("=")
+            opts[k] = int(v) if v.isdigit() else v
+    r = PhreeqcRun(ds, now=stamp(1), **opts)
     t0 = time.time()
     for i in range(1, ndays + 1):
         res = r.run_day(i, now=stamp(i))
@@ -102,4 +109,4 @@ def main(ndays, work, fixes=None):
 
 
 if __name__ == "__main__":
-    main(int(sys.argv[1]), Path(sys.argv[2]), sys.argv[3] if len(sys.argv) > 3 else None)
+    main(int(sys.argv[1]), Path(sys.argv[2]), *sys.argv[3:5])

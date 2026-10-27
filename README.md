@@ -47,6 +47,27 @@ database takes only 0.02 s. Options for `PhreeqcRun`:
   cell 2, frozen, 0.01 mm), where it is about 1e-4.
 - `printoutput=0` writes only warnings and errors to the `.out` file (about
   0.1 s a day).
+- `engine="iphreeqc"` runs PHREEQC in memory through the IPhreeqc library
+  (`artemis_p.iphreeqc`) instead of starting the executable each day. The
+  state stays in memory rather than going through the daily dump file, and
+  the PHASES/RATES includes and the SELECTED_OUTPUT/USER_PUNCH definitions
+  are read again only when they change. With `cellworkers=N` the cells'
+  kinetics run in N threads, each cell in its own IPhreeqc instance, so the
+  results are the same for any N. The cell with the least water runs where
+  the state already is: started from a dump, it can take twice as long to
+  converge. Results agree with the executable to about 3e-4 of each field's
+  range over 60 days (the executable rounds the state to text every day).
+  The whole state is dumped at the end of the run, for restarts.
+
+On 4 cores, 60 days of rBcomp take 1.14 s a day with the executable, 0.94
+with `engine="iphreeqc"`, and 0.56 with `engine="iphreeqc", cellworkers=4,
+printoutput=0`.
+
+Building IPhreeqc: there is no 3.7.3 release of IPhreeqc, so use v3.7.4 of
+github.com/usgs-coupled/IPhreeqc with `src/phreeqcpp/pitzer.cpp` and
+`transport.cpp` copied from PHREEQC v3.7.3 (the only engine files that
+differ), then `cmake -DBUILD_SHARED_LIBS=ON -DBUILD_TESTING=OFF` and
+`make IPhreeqc`. Point `$IPHREEQC_LIB` at the `libIPhreeqc.so` it builds.
 
 Separate sites or scenarios can also run in parallel.
 
@@ -54,8 +75,13 @@ Separate sites or scenarios can also run in parallel.
 
 - [x] PHREEQC runner, selected-output reader, MATLAB `.mat` reference loader
 - [x] rBcomp day 1 reproduced from the published input (PHREEQC 3.7.3)
-- [ ] Input reading
-- [ ] Soil, phases and chemistry setup
-- [ ] Climate and hydrology
-- [ ] PHREEQC input writer (match published `.in_init` files)
-- [ ] Daily driver loop
+- [x] Input reading, soil, phases and chemistry setup (rBcomp path)
+- [x] Climate and Richards hydrology (rBcomp path)
+- [x] PHREEQC input writer and daily driver loop: the full 2,192-day rBcomp
+  run matches the published one (last-day `.in` byte-identical with the
+  executable; end-of-run totals within 1e-7 with `engine="iphreeqc"`)
+- [x] End-of-run totals and comparison with observations
+- [x] Bug fixes as switches (`artemis_p/fixes.py`)
+- [ ] Other published scenarios (only rBcomp is checked end to end)
+- [ ] Not ported: bucket hydrology, bottom-up mixing, SWAT snow, potential
+  ET, soil respiration, drains, `getlayerfluxes`/`getnetCDRfluxes`, plotting
