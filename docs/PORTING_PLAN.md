@@ -66,6 +66,29 @@ Plotting code (`getfig`, `show*`, figure scripts) is not ported.
 
 ## Bugs found in the MATLAB code
 
+### Likely to affect published results
+
+- **Native mineral surface area ignores mineral abundance (`setupsoilphases.m`).**
+  `RSAD = PMD./psdthresh./1000./G(m).*6` uses the mass of *all* soil
+  minerals in each size class (`PMD`) and is never multiplied by the
+  mineral's proportion `prop.(phase)`. As a result every native mineral gets
+  the reactive surface area of the whole mineral fraction, differing only by
+  density. In the published rBcomp day-1 input, cell 8 has 0.29 mol of
+  MagnetiteRLBT with RSA 0.072 m2 and 4055 mol of QuartzRLBT with RSA
+  0.142 m2. The saved `ds.run.RSA` shows identical `RSA x G` for every
+  native phase, including CalciteBT in layers with zero calcite. Trace
+  minerals (magnetite, ilmenite, garnet, epidote, hornblende, pyroxenes) are
+  therefore given far too much surface relative to their mass. The global
+  `nativeRSAscale = 1e-6` may have been tuned around this. The fix is
+  presumably `mass`-weighting, `RSAD.*prop.(phase{m})`.
+- **Hornblende formula typo (`examples/EF_data/Richland_loess_Batestown_till_phases_combined.csv`).**
+  HornblendeRLBT's `Formula` is `Ca2Mg52Si8O22(OH)2`; it should be
+  `Ca2Mg5Si8O22(OH)2` (tremolite, as in its reaction and molar mass). The
+  formula goes into the KINETICS `-formula` line, so each mole of native
+  hornblende that dissolves releases 52 Mg instead of 5.
+
+### Other issues
+
 These are ported as written, so outputs keep matching the reference. They are
 flagged here to fix once the port is verified.
 
