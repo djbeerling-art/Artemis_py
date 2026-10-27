@@ -78,6 +78,20 @@ def _split_day(text):
             sel.group(1), dmpin[0], dmpout.group(1))
 
 
+_NUMBERED = re.compile(r"^\w+_RAW\s+(\d+)", re.M)
+_NUMBERED_IN = re.compile(r"\b(?:SOLUTION|SOLUTION_MODIFY|MIX|EQUILIBRIUM_PHASES|EQUILIBRIUM_PHASES_MODIFY|EXCHANGE|"
+                          r"SURFACE|KINETICS|KINETICS_MODIFY|REACTION|SAVE \w+)\s+(\d+)\b")
+
+
+def _numbers_in(dump, text):
+    """Entity numbers defined in a dump file and in ``text``; None if the dump can't be read."""
+    try:
+        nums = {int(n) for n in _NUMBERED.findall(Path(dump).read_text(errors="replace"))}
+    except OSError:
+        return None
+    return nums | {int(n) for n in _NUMBERED_IN.findall(text)}
+
+
 def run_cells_parallel(infile, dbfile, outfile=None, screenout=None, exe=None, cwd=None, workers=4):
     """Run one day's input with each cell's kinetics in its own PHREEQC process.
 
@@ -116,8 +130,15 @@ def run_cells_parallel(infile, dbfile, outfile=None, screenout=None, exe=None, c
     def selfile(name):
         return head.replace(f"-file {sel}\n", f"-file {tmp / name}.sel\n", 1)
 
+    # dump each cell separately and everything else once: one -all dump on top would double the writing
+    rest = _numbers_in(base / dmpin, mixing) - {k for k, _ in blocks}
     dumps = "".join(f"DUMP\n    -file {tmp}/A{k}.dmp\n    -cells {k}\nEND\n" for k, _ in blocks)
-    rcA = go("A", selfile("A") + mixing + f"DUMP\n    -file {tmp / 'A.dmp'}\n    -all\nEND\n" + dumps)
+    if rest is None or rest:
+        sel_rest = "-all" if rest is None else "-cells " + " ".join(str(k) for k in sorted(rest))
+        dumps = f"DUMP\n    -file {tmp / 'A.dmp'}\n    {sel_rest}\nEND\n" + dumps
+    else:
+        (tmp / "A.dmp").write_text("")
+    rcA = go("A", selfile("A") + mixing + dumps)
     names = [f"K{k}" for k, _ in blocks]
     if rcA == 0:
         # each cell starts from the dump of its own cell only
