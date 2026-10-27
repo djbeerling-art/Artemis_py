@@ -235,3 +235,52 @@ def test_process_timetable(tmp_path):
     out = (Path(os.environ["ARTEMIS_PHREEQC"]) / f"{RBCOMP}.out").read_text(encoding="latin-1").splitlines()
     i = next(k for k, ln in enumerate(out) if "UAN28 # Slow-release" in ln)
     assert mine == norm(out[i:i + 200])[:len(mine)]
+
+
+def test_setup_phases():
+    import copy
+
+    import numpy as np
+    import pandas as pd
+
+    from artemis_p.forcing import set_run_time_arrays
+    from artemis_p.phases import setup_phases
+    from artemis_p.sorption import cec_sorb, set_soil_texture
+    from artemis_p.timetable import read_timetable
+    from artemis_p.treatments import process_timetable
+
+    root = Path(os.environ["ARTEMIS"])
+    ds = copy.deepcopy(_ef_cells())
+    ds["parm"].update(fsname="Blueridge", writetrRATESfiles=0, RSAscale=2)
+    ds["dbdir"] = root / "phreeqcdbincludefiles"
+    ds["feedstockPSDfile"] = "../EF_data/Lewis_feedstocks_PSD.csv"
+    ds = cec_sorb(set_soil_texture(ds))
+    ds = set_run_time_arrays(ds, "2015-01-01", "2020-12-31")
+    ds = read_timetable(ds, root / "examples" / "EF_data" / "EF_maize_B0_timetable.csv")
+    ds = setup_phases(process_timetable(ds), basedir=root / "examples" / "EF2")
+    ref = ref_ds()
+
+    def col(df, c):
+        return df[c].to_numpy() if pd.api.types.is_numeric_dtype(df[c]) else list(df[c])
+
+    t, rt = ds["phasetable"], ref["phasetable"]
+    assert list(t.index) == rt["_rownames"]
+    assert [c for c in t] == [c for c in rt if c != "_rownames"]
+    for c in t:
+        if c == "csvfile":  # MATLAB keeps the relative path it was given
+            assert [Path(p).name for p in t[c]] == [Path(p).name for p in rt[c]]
+            continue
+        assert matref.differences(col(t, c), rt[c], c, rtol=1e-10) == [], c
+    ft, rft = ds["feedstocktable"], ref["feedstocktable"]
+    assert [c for c in ft] == [c for c in rft if c != "_rownames"]
+    for c in ft:
+        assert matref.differences(col(ft, c), rft[c], c, rtol=1e-10) == [], c
+    run, rrun = ds["run"], ref["run"]
+    for k in ("moles", "RSA", "treatment", "grams"):
+        assert sorted(run[k]) == sorted(rrun[k]), k
+        for p, v in rrun[k].items():
+            assert np.allclose(run[k][p], v, rtol=1e-10, atol=0), (k, p)
+    for k in ("nucSA", "nucN", "treatment"):
+        assert matref.differences(ds["cell"][k], ref["cell"][k], k, rtol=1e-12) == [], k
+    assert matref.differences(ds["stoich"], ref["stoich"], "stoich", rtol=1e-12) == []
+    assert matref.differences(ds["timetable"]["dosekg"], ref["timetable"]["dosekg"], "dosekg") == []

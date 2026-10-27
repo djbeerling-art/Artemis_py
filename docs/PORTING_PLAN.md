@@ -38,7 +38,7 @@ Plotting code (`getfig`, `show*`, figure scripts) is not ported.
    `readtimetable`, `readinitlayerdata`, `readobsdata`, `getscreenedtable`,
    `getphasetable`, `getperiodictable`, `setmodelspecies`, `getdecyear`.
    Checked against `ds.timetable`, `ds.layer`, `ds.phasetable` in the `.mat`.
-3. **Soil, phases and chemistry setup (~4,000 lines; in progress: `getcellsfromlayers`, `setupsoilphases`, `pedotransfer`, full `checkphasetype`, `setsoiltexture`, `CECsorb`, `processtimetable`, `getfert` done).** `setupphases`,
+3. **Soil, phases and chemistry setup (~4,000 lines; in progress: `getcellsfromlayers`, `setupsoilphases`, `pedotransfer`, full `checkphasetype`, `setsoiltexture`, `CECsorb`, `processtimetable`, `getfert`, `setupphases` (vintage PSD path), `setnucSA`, full `implicitcalc`, `parse_formula` done).** `setupphases`,
    `setupsoilphases`, `checkphasetype`, `implicitcalc`, `getcellsfromlayers`,
    `pedotransfer`, `markPSDinit`, `getRosinRammlerPSD`, `setnucSA`,
    `setstoichiometry`, `CECsorb`, `Cerling1991`, `getfert`, `setupnutuptake`,
@@ -154,6 +154,21 @@ flagged here to fix once the port is verified.
   file left by an earlier run with other fertilisers is silently used, and
   PHREEQC then has no rate law for the new treatment (the archived EF2 copy
   is an example of such a leftover).
+- **Geometric area from lambda (`setupphases.m` `setRSA`).** With a BET area
+  and lambda but no geometric area it sets `geo_m2g=lambda.*BET_m2g`. Since
+  lambda is BET/geo, this should be `BET_m2g./lambda`. EF gives all three, so
+  it is unaffected.
+- **Per-feedstock RSAscale never used (`setupphases.m` `setRSA`).** The test
+  `numel(strcmpi(fld,'RSAscale'))==0` is never true, and `ds.parm.RSAscale`
+  is always set (default 1) at the top of the function, so an `RSAscale`
+  column in a feedstock table is ignored.
+- **Timetabled phase treatments (`setupphases.m` `checktimetablephase`).**
+  `ds.timetable.RSA=zeros(numel(runindex))` makes an n-by-n matrix, and an
+  assumed RSA is written to every phase entry (`RSA(wph)`) rather than the
+  current one (`RSA(jph)`). Not used by EF (no `phase` dose forms).
+- **Hydrated formulas (`setupphases.m` `setstoichiometry`).** `f{ws}=[...]`
+  only works when exactly one formula has a `:nH2O` part; two or more would
+  error. EF has one (nesquehonite).
 - **CEC scaling ignored (`CECsorb.m`).** If `ds.scale` exists without a `CEC`
   field (EF has `ds.scale.pCO2g`), `parm.CECscl` is ignored.
 
