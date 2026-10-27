@@ -179,6 +179,13 @@ flagged here to fix once the port is verified.
   start, so `run.decyear>=timetable.decyear` puts each crop change on the
   following day, while peak biomass, harvest and sowing depth go on the
   timetable day itself.
+- **Maize silicon uptake skipped (`daySWAT7.m` `getnutuptake`).** Crop-specific
+  rows in cropstoichiometry.csv are matched with case-sensitive `contains`, so
+  `Maize` (Si 2.1% of dry mass, B) never matches the timetable crop `maize` and
+  maize takes up no Si. This may matter for the Si budget of silicate weathering.
+- **P uptake rescaling (`daySWAT7.m` `getcellup`).** `celluptake.P(1,w)` rescales
+  only the top cell (N uses `(:,w)`). In rBcomp the P arrays are then replaced
+  by the N-ratio values from cropstoichiometry.csv, so the result is unaffected.
 - **CEC scaling ignored (`CECsorb.m`).** If `ds.scale` exists without a `CEC`
   field (EF has `ds.scale.pCO2g`), `parm.CECscl` is ignored.
 

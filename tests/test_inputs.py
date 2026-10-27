@@ -318,3 +318,28 @@ def test_preprocess_rbcomp():
     # Set later: evapfrac, pO2g, si_O2g (setuprun) and exchfld (getphreeqcrun)
     later = {"evapfrac", "pO2g", "si_O2g", "exchfld"}
     assert sorted(ds["cell"]) == sorted(k for k in ref["cell"] if k not in later)
+
+
+def test_day_swat():
+    """daySWAT7: crop growth, ET partitioning and nutrient uptake."""
+    import copy
+
+    from artemis_p.swat import day_swat
+
+    ds = copy.deepcopy(_rbcomp_preprocessed())
+    ds["units"] = {"mmscl": "L", "scl": "m^{-2}land"}
+    ds = day_swat(ds)
+    ref = ref_ds()
+    run, rrun = ds["run"], ref["run"]
+    for k in ("LAI", "LAIinc", "totmass", "rootmass", "zroot", "dzroot", "PHU", "frPHU", "grow", "canhgt",
+              "frLAI", "legstage", "frN", "frP", "Nmass", "Nmassinc", "Pmass", "Pmassinc", "GS", "tcdepth",
+              "liveroot", "cover", "canint", "canevap", "totET", "ET", "cellup", "vegmass", "grainmass",
+              "cellET", "totmassinc", "rootmassinc", "vegmassinc"):
+        assert matref.differences(run[k], rrun[k], k, rtol=1e-10, atol=1e-12) == [], k
+    for g in ("uptake", "totuptake", "totcuptake", "celluptake", "cellcuptake", "nutrat"):
+        for k, v in rrun[g].items():
+            if k not in ("label", "units"):
+                assert matref.differences(run[g][k], v, f"{g}.{k}", rtol=1e-10, atol=1e-14) == [], (g, k)
+    assert matref.differences(ds["cell"]["evapfrac"], ref["cell"]["evapfrac"], "evapfrac", rtol=1e-12) == []
+    for k in ("conc", "massfrac", "source", "stoichN"):
+        assert matref.differences(ds["cropstoich"][k], ref["cropstoich"][k], k, rtol=1e-12) == [], k
