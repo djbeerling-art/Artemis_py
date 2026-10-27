@@ -157,7 +157,8 @@ def read_timeseries(ds, fname, keepmonthly=False):
             else:
                 val = _interp1(tdec, y, run["decyear"]) / fscl
             run[n] = _fill_ends(val, ds["nrun"])
-            provided[n] = str(fname)
+            if n != "juldate":
+                provided[n] = str(fname)
     ds.setdefault("inputfiles", []).append(str(fname))
     return ds
 

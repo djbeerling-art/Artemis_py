@@ -38,7 +38,7 @@ Plotting code (`getfig`, `show*`, figure scripts) is not ported.
    `readtimetable`, `readinitlayerdata`, `readobsdata`, `getscreenedtable`,
    `getphasetable`, `getperiodictable`, `setmodelspecies`, `getdecyear`.
    Checked against `ds.timetable`, `ds.layer`, `ds.phasetable` in the `.mat`.
-3. **Soil, phases and chemistry setup (~4,000 lines; in progress: `getcellsfromlayers`, `setupsoilphases`, `pedotransfer`, full `checkphasetype`, `setsoiltexture`, `CECsorb`, `processtimetable`, `getfert`, `setupphases` (vintage PSD path), `setnucSA`, full `implicitcalc`, `parse_formula` done).** `setupphases`,
+3. **Soil, phases and chemistry setup (~4,000 lines; in progress: `getcellsfromlayers`, `setupsoilphases`, `pedotransfer`, full `checkphasetype`, `setsoiltexture`, `CECsorb`, `processtimetable`, `getfert`, `setupphases` (vintage PSD path), `setnucSA`, full `implicitcalc`, `parse_formula`, `setfeedstock`, `setrunarrays`, `setcropfromtimetable` done; `preprocess.setup_data_struc` runs the whole chain from the EF2 input files and matches the saved ds up to this point).** `setupphases`,
    `setupsoilphases`, `checkphasetype`, `implicitcalc`, `getcellsfromlayers`,
    `pedotransfer`, `markPSDinit`, `getRosinRammlerPSD`, `setnucSA`,
    `setstoichiometry`, `CECsorb`, `Cerling1991`, `getfert`, `setupnutuptake`,
@@ -169,6 +169,16 @@ flagged here to fix once the port is verified.
 - **Hydrated formulas (`setupphases.m` `setstoichiometry`).** `f{ws}=[...]`
   only works when exactly one formula has a `:nH2O` part; two or more would
   error. EF has one (nesquehonite).
+- **Feedstock name case (`markPSDinit.m` `getgoodandready`).** It matches
+  timetable treatments to feedstocks with case-sensitive `strcmp`, so EF's
+  `Blueridge` never matches `blueridge` and no particle-size tracking is set
+  up. Harmless for the published runs (`SAmethod='traditional'`), but the
+  `discrete` method would silently track nothing.
+- **Crop start day (`setupdatastruc.m` `setcropfromtimetable`).** Timetable
+  decimal years use the middle of the day (`doy-0.5`) and run decimal years the
+  start, so `run.decyear>=timetable.decyear` puts each crop change on the
+  following day, while peak biomass, harvest and sowing depth go on the
+  timetable day itself.
 - **CEC scaling ignored (`CECsorb.m`).** If `ds.scale` exists without a `CEC`
   field (EF has `ds.scale.pCO2g`), `parm.CECscl` is ignored.
 

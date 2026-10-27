@@ -67,3 +67,48 @@ def rerun_init(name, phreeqc_dir, workdir, dbname="THAmmOrgAlP.dat", exe=None, *
     ref = Path(phreeqc_dir) / f"{name}.sel_init"
     cmp = compare_sel(infile.with_suffix(".sel"), ref) if ref.exists() and res.ok else None
     return res, cmp
+
+
+# Input files of the published EF2 runs, as in ds.usefiles (relative to examples/EF2)
+EF2_FILES = [
+    "../EF_data/Richland_loess_Batestown_till_phases_combined.csv",
+    AUTHOR_DBDIR + "/secondary_phases.csv",
+    AUTHOR_DBDIR + "/feedstock_phases_pure.csv",
+    AUTHOR_DBDIR + "/feedstock_phases_Lewis_THERMODDEM.csv",
+    "../EF_data/Lewis_feedstocks_PSD.csv",
+    "../EF_data/initlayers_Flanagan_EF_0-183cm.csv",
+    "../EF_data/rainwater_Champaign_NTN_2021_initialChemistry.csv",
+    "../EF_data/EF_maize_B0_timetable.csv",
+] + [f"../EF_data/EF_CLM5_2015-2070_timeseries_{f}.csv"
+     for f in ("soiltemp", "airtemp", "soilresp", "CO2atm", "snow", "infil_ET")]
+
+
+def ef2_resolver(artemis=None):
+    """Map EF2 input names (relative to examples/EF2, or under the authors'
+    include directory) to local paths."""
+    artemis = Path(artemis or artemis_root())
+    ef2 = artemis / "examples" / "EF2"
+
+    def resolve(f):
+        if f.startswith(AUTHOR_DBDIR):
+            return artemis / "phreeqcdbincludefiles" / f[len(AUTHOR_DBDIR):].lstrip("/")
+        return (ef2 / f).resolve() if not Path(f).is_absolute() else Path(f)
+
+    return resolve, ef2
+
+
+def rbcomp_settings(artemis=None):
+    """Initial ds for the rBcomp_Blueridge run: EF2 defaultsettings.m,
+    BRscalings.m and the run's own arguments in rBcompscript.m."""
+    artemis = Path(artemis or artemis_root())
+    parm = {
+        "writetrRATESfiles": 0, "t1": "2015-01-01", "t2": "2020-12-31",
+        "Feactfrac": 0.01, "SOCactfrac": 0.629, "CECopt": "CECcarboxylic", "setexaciditysp": "Al",
+        "nativeRSAscale": 1e-6, "tillagedepth": 18, "fixCO2gmol": 10, "releaseCO2": 0,
+        "sdnco": 1.46, "maxsut": 3.0, "kNhumsday": 3.5e-4, "fsname": "Blueridge",
+        "implicit": ["Titanite_blueridge", "Hydroxyapatite_blueridge"], "RSAscale": 2, "impscale": 5,
+    }
+    return {"parm": parm, "EXCHmethod": "comp", "WHAMSA": 12, "SAmethod": "traditional",
+            "HYDROmethod": "Richards", "ETmethod": "MIXflownut", "MIXdir": "topdown",
+            "dbdir": artemis / "phreeqcdbincludefiles",
+            "phasesratesfile": "../EF_CLM5/" + FLANAGAN}

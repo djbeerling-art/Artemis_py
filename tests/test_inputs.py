@@ -284,3 +284,37 @@ def test_setup_phases():
         assert matref.differences(ds["cell"][k], ref["cell"][k], k, rtol=1e-12) == [], k
     assert matref.differences(ds["stoich"], ref["stoich"], "stoich", rtol=1e-12) == []
     assert matref.differences(ds["timetable"]["dosekg"], ref["timetable"]["dosekg"], "dosekg") == []
+
+
+@lru_cache(maxsize=1)
+def _rbcomp_preprocessed():
+    from artemis_p.preprocess import setup_data_struc
+    from artemis_p.reference import EF2_FILES, ef2_resolver, rbcomp_settings
+
+    resolve, ef2 = ef2_resolver()
+    return setup_data_struc(rbcomp_settings(), EF2_FILES, resolve, basedir=ef2)
+
+
+def test_preprocess_rbcomp():
+    """setupdatastruc up to setrunarrays, end to end from the EF2 inputs."""
+    ds, ref = _rbcomp_preprocessed(), ref_ds()
+    assert ds["inputfiles"] == [f for f in ref["inputfiles"] if "obs" not in f]
+    assert matref.differences(ds["provided"], ref["provided"], "provided") == []
+    run, rrun = ds["run"], ref["run"]
+    # residue, rootresidue and mixfrac are filled in later by setuprun/setupnutuptake
+    for k in ("crop", "plant", "wtt", "sowdepth", "harvest", "peaktot", "peakroot", "treated",
+              "tillagefrac", "si_CO2atm", "precip", "airtemp", "soiltemp", "ET", "infil",
+              "moles", "RSA", "treatment", "grams", "gdust"):
+        assert matref.differences(run[k], rrun[k], k, rtol=1e-12) == [], k
+    for k in ("nmix", "nmixsoln", "MIXture", "MIXsoln", "MIXsolnstr", "plantdensity", "mark"):
+        assert matref.differences(ds[k], ref[k], k) == [], k
+    # 1x1 MATLAB cell arrays come back from the .mat file as plain strings
+    assert ds["treatments"] == [ref["treatments"]]
+    assert ds["INCLUDE"] == [ref["INCLUDE"]]
+    tt, rtt = ds["timetable"], ref["timetable"]
+    assert sorted(tt) == sorted(rtt)
+    for k in tt:
+        assert matref.differences(tt[k], rtt[k], k) == [], k
+    # Set later: evapfrac, pO2g, si_O2g (setuprun) and exchfld (getphreeqcrun)
+    later = {"evapfrac", "pO2g", "si_O2g", "exchfld"}
+    assert sorted(ds["cell"]) == sorted(k for k in ref["cell"] if k not in later)
