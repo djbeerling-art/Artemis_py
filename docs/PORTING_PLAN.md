@@ -34,7 +34,7 @@ Plotting code (`getfig`, `show*`, figure scripts) is not ported.
 
 1. **Infrastructure (done).** PHREEQC runner, `.sel` reader and comparison,
    `.mat` loader, rBcomp day-1 regression test.
-2. **Input reading (~2,000 lines).** `readinputfiles`, `readcsvdata`,
+2. **Input reading (~2,000 lines; in progress: `readcsvdata`, `getperiodictable`, `readtimetable`, `getdecyear`, `getscreenedtable` done).** `readinputfiles`, `readcsvdata`,
    `readtimetable`, `readinitlayerdata`, `readobsdata`, `getscreenedtable`,
    `getphasetable`, `getperiodictable`, `setmodelspecies`, `getdecyear`.
    Checked against `ds.timetable`, `ds.layer`, `ds.phasetable` in the `.mat`.
@@ -63,6 +63,16 @@ Plotting code (`getfig`, `show*`, figure scripts) is not ported.
   same echoed input.
 - The published outputs were made with PHREEQC 3.7.3. PHREEQC 3.8.6 and
   3.9.0 differ by up to 0.008 pH from the first kinetic step onward.
+
+## Bugs found in the MATLAB code
+
+These are ported as written, so outputs keep matching the reference. They are
+flagged here to fix once the port is verified.
+
+- **Leap years (`getdecyear.m`).** It tests "divisible by 4 and not divisible
+  by 400", which makes 2000 a non-leap year (and 1900 and 2100 leap years).
+  This doesn't affect 2001-2099, but the spin-up runs (`rspin*`) start in
+  January 2000. Python: `timetable.is_leap_matlab`.
 
 ## MATLAB call graph (rBcomp entry points)
 
