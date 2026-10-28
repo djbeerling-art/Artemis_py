@@ -64,7 +64,7 @@ def main(work, png, scepter=None):
         ax.set_title(title, fontsize=9.5, color=INK, loc="left")
         ax.grid(color=GRID, lw=0.6)
         ax.spines[["top", "right"]].set_visible(False)
-        ax.set_xlim(1, n)
+        ax.set_xlim(max(1, on[0] - 9) if len(on) else 1, n)  # from just before the flood
     for ax in axes[1]:
         ax.set_xlabel("Run day (shaded: flooded)")
     h, lab = axes[0, 0].get_legend_handles_labels()

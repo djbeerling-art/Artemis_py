@@ -86,4 +86,15 @@ O2 goes first, then nitrate, then Fe(III) is reduced, and CH4 builds slowly. The
 (10 cm thick) stays oxic because floodwater O2 reaches it all. The nitrate jump on day
 ~118 is the season's UAN28 fertiliser. Over the flood, 0.09 mol CH4 m-2 (14 kg ha-1) was
 produced. The SCEPTER line is a closed flood at 25 C in a 1 cm cell, so it is a guide
-only. A summer season (from day of year 152) comes next.
+only.
+
+`paddy_column_summer.png` is the summer season: a 113-day flood from 1 June 2015 (soil
+22-24 C), drained before and after. Over the flood the column made 0.86 mol CH4 m-2
+(138 kg ha-1). The spec calibrates SCEPTER's emission, with plants, to 132-135 kg ha-1.
+Ebullition vented 0.49 mol m-2 (78 kg ha-1), and almost none was oxidised. The rest
+stays dissolved until the drain, when it degasses. Without plants (step 3) there is no
+plant transport. Nitrate (fertiliser) goes in about three weeks, then Fe(II) rises to
+about 0.5 mM and CH4 reaches the 0.4 atm ebullition threshold. The soil is more acid
+than the SCEPTER reference site (pH 6.0-6.5, against 7-7.6), so green rust does not form
+and the pH stays low. The rain carries little sulfate, so little FeS forms. These are
+differences between the sites. The top cell stays oxic, as in the winter test.
