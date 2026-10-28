@@ -12,6 +12,7 @@ import numpy as np
 
 from .csvdata import read_csv_data
 from .fixes import enabled as fixed
+from . import paddy
 from .richards import get_rich_quick
 from .swat import day_swat
 
@@ -67,6 +68,8 @@ def setup_run(ds, et_method="MIXflow", co2scl=1.0, legacy_airpor=False, **swat_k
     if "pCO2g" in scale:
         co2scl = scale["pCO2g"]
     set_soil_co2(ds, soilco2opt, co2scl)
+    if ds.get("paddy") is not None:
+        paddy.apply_gases(ds)
     return ds
 
 
@@ -81,6 +84,8 @@ def set_mix_fracs(ds):
     if "infil" not in run:
         raise NotImplementedError("infiltration must come from the forcing data")
     ds = get_rich_quick(ds)
+    if ds.get("paddy") is not None:
+        ds = paddy.apply_hydrology(ds)
     run = ds["run"]
     nc, n = ds["ncells"], ds["nrun"]
     mmscl = ds["units"]["mmscl"]

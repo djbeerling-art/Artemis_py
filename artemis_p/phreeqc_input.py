@@ -21,7 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import phreeqc
+from . import paddy, phreeqc
 from .fixes import active, enabled as fixed
 from .mformat import sprintf
 from .obs import assessrun2
@@ -192,6 +192,7 @@ class PhreeqcRun:
         self.kinsteps = None
         self.carbsite, self.phensite, self.dipsite = list(CARBSITE), list(PHENSITE), list(DIPSITE)
 
+        self.paddy = paddy.config(ds)
         self.getsettings()
         self._apply_options(opts)
         self._setup()
@@ -461,6 +462,10 @@ class PhreeqcRun:
         run, cell = ds["run"], ds["cell"]
         nrun, ncells = ds["nrun"], ds["ncells"]
         self.nnut = len(ds["nut"])
+        if self.paddy is not None:  # the paddy acceptor ladder replaces SWAT's OM and N
+            for f in paddy.OFF_SWAT:
+                stg[f] = 0
+            stg["usecvode"] = 1  # Runge-Kutta stalls on Fe(II) oxidation in drained cells (stiff)
         if ds.get("plantdensity") is not None and ds["plantdensity"] <= 0:
             stg["includeuptake"] = 0
         if "plant" not in run or np.sum(run["plant"]) == 0:
@@ -498,7 +503,8 @@ class PhreeqcRun:
         self.nkinphase = len(self.kinphase)
         stg["includekinetics"] = (stg["usedust"] + stg["includeuptake"] + stg["includeresidues"]
                                   + stg["includehumus"] + stg["includeNkinetics"] + stg["includenative"]
-                                  + stg["includemanure"] + stg["includerootresidues"] + stg["includetreatments"])
+                                  + stg["includemanure"] + stg["includerootresidues"] + stg["includetreatments"]
+                                  + (self.paddy is not None))
         if not stg["includekinetics"]:
             for f in ("usedust", "includeuptake", "includeresidues", "includehumus", "includeNkinetics",
                       "includenative", "includemanure", "includerootresidues", "includetreatments"):
@@ -563,6 +569,10 @@ class PhreeqcRun:
             scheme["mpsolidfrac"] = 0
             if stg["includemanure"]:
                 scheme["manureformula"] = self._residueformula(np.flatnonzero(run["manure"][0] > 0), "Manure")
+        if self.paddy is not None:  # the paddy pools change every day
+            kinflag[:, inrun] = 3
+            if not self.restart:
+                kinflag[:, self.istart - 1] = 1
         self.kinflag = kinflag
 
         self.sp = list(ds["solute"])
@@ -753,6 +763,8 @@ class PhreeqcRun:
         if "INCLUDE" in ds:
             for f in ([ds["INCLUDE"]] if isinstance(ds["INCLUDE"], str) else ds["INCLUDE"]):
                 w("INCLUDE$ %s\n", _str(f))
+        if self.paddy is not None:
+            w("INCLUDE$ %s\n", str(paddy.DAT))
         if (stg["includeuptake"] or stg["includehumus"] or stg["includeresidues"] or stg["includerootresidues"]
                 or stg["includemanure"]):
             w("INCLUDE$ %s\n", _str(self.plantratesfile))
@@ -910,6 +922,8 @@ class PhreeqcRun:
             soil.setdefault(f, np.zeros((ds["ncells"], ds["nrun"])))[:, i - 1] = prev + soil["d" + f][:, i - 1]
             soil.setdefault("p_DINuptake", np.zeros((ds["ncells"], ds["nrun"])))[:, i - 1] = (
                 soil["p_Nuptake"][:, i - 1] + soil["p_Ammuptake"][:, i - 1])
+        if self.paddy is not None:
+            paddy.after_day(self, i)
         for p in self.kinphase[: self.nkinphase]:
             out["run"]["M"][p][:, i - 1] = soil["k_" + p][:, i - 1] * self.targH2O[:, i - 1]
             if "Implicit_" in p:
@@ -1077,9 +1091,13 @@ class PhreeqcRun:
             w(" %s", e)
             if e == "Fe":
                 w(" Fe(2) Fe(3)")
+        if self.paddy is not None:
+            w(" %s", " ".join(paddy.TOTALS))
         w(" Tracer\n")
         w("    -water\n")
         w("    -equilibrium_phases CO2(g) O2(g) ")
+        if self.paddy is not None:
+            w("%s ", " ".join(paddy.GASES))
         pt = ds.get("phasetable")
         for e in self.eqsolid:
             w(" %s", self.tv(pt, e, "PHREEQCphase"))
@@ -1092,8 +1110,11 @@ class PhreeqcRun:
         w("\n")
         rates = self.scheme["rates"]
         if (self.nkinphase > 0 or stg["includeuptake"] or stg["includehumus"] or stg["includeresidues"]
-                or stg["includerootresidues"] or stg["includemanure"] or stg["includeNkinetics"]):
+                or stg["includerootresidues"] or stg["includemanure"] or stg["includeNkinetics"]
+                or self.paddy is not None):
             w("    -kinetic_reactants ")
+            if self.paddy is not None:
+                w(" %s", " ".join(paddy.POOLS + paddy.OUTPUT_REACTIONS))
             for p in self.kinphase[: self.nkinphase]:
                 w(" %s", p)
             if stg["includetreatments"]:
@@ -1246,7 +1267,10 @@ class PhreeqcRun:
             w("    %10s %g charge\n", self.charge0fld, 0.000001)
         w("    %19s %f\n", "C(4) 10 CO2(g)", run["si_CO2atm"][i - 1])
         # MATLAB compares the influent struct with 'pe'/'O2g' (always false), so these are fixed
-        if fixed(ds, "influent_redox"):
+        if self.paddy is not None:  # O2 as decoupled Oxg; no coupled O(0) to oxidise Fe(II) at equilibrium
+            w("    %19s %f\n", "Oxg 10 Oxg(g)", ds["influent"].get("O2g", -0.677778))
+            w("    %10s %g\n", "pe", paddy.PE)
+        elif fixed(ds, "influent_redox"):
             w("    %10s %g O2(g) %f\n", "pe", ds["influent"].get("pe", 12.5), ds["influent"].get("O2g", -0.677778))
         else:
             w("    %10s %d O2(g) %f\n", "pe", 12.5, -0.677778)
@@ -1313,10 +1337,16 @@ class PhreeqcRun:
             siCO2g = run["si_CO2atm"][0]
         siO2g = run["si_O2g"][insoln - 1, i - 1] if "si_O2g" in run else -0.677778
         w("    %19s %f\n", "C(4) 10 CO2(g)", siCO2g)
-        w("    %19s %f\n", "O(0) 10 O2(g)", siO2g)
+        if self.paddy is not None:
+            w("    %19s %f\n", "Oxg 10 Oxg(g)", siO2g)
+        else:
+            w("    %19s %f\n", "O(0) 10 O2(g)", siO2g)
         if "pH" not in msp:
             w("    %10s %d CO2(g) %f\n", "pH", 5.5, siCO2g)
-        w("    %10s %d O2(g) %f\n", "pe", 12.5, siO2g)
+        if self.paddy is not None:
+            w("    %10s %g\n", "pe", paddy.PE)
+        else:
+            w("    %10s %d O2(g) %f\n", "pe", 12.5, siO2g)
         if "soiltemp" in run:
             w("    %10s %f\n", "temp", run["soiltemp"][insoln - 1, i - 1])
         else:
@@ -1433,8 +1463,14 @@ class PhreeqcRun:
         ds, k, i = self.ds, self.k, self.i
         run, w = ds["run"], self._w
         w("EQUILIBRIUM_PHASES %d; ", k)
-        w("    %10s %g %g; ", "CO2(g)", run["si_CO2g"][k - 1, i - 1], run["CO2gmol"][k - 1, i - 1])
-        w("    %10s %g %g\n", "O2(g)", run["si_O2g"][k - 1, i - 1], run["O2gmol"][k - 1, i - 1])
+        if self.paddy is not None:  # O2 enters as decoupled Oxg, so that oxidation stays kinetic
+            targ = self.targH2O[k - 1, i - 1]
+            w("    %10s %g %g; ", "CO2(g)", *paddy.co2_phase(ds, k, i))
+            w("    %10s %g %g; ", "Oxg(g)", run["si_O2g"][k - 1, i - 1], paddy.eqphase_moles(ds, targ, k, i))
+            w("    %10s %g 0\n", "Mtg(g)", run["si_CH4g"][k - 1, i - 1])
+        else:
+            w("    %10s %g %g; ", "CO2(g)", run["si_CO2g"][k - 1, i - 1], run["CO2gmol"][k - 1, i - 1])
+            w("    %10s %g %g\n", "O2(g)", run["si_O2g"][k - 1, i - 1], run["O2gmol"][k - 1, i - 1])
         pt = ds.get("phasetable")
         if pt is not None:
             for e in self.eqsolid:
@@ -1513,9 +1549,18 @@ class PhreeqcRun:
                     O2gmol, resetO2g = run["O2gmol"][K, I], 1
                 elif scheme["O2gprotocol"].lower() == "topup" and out["soil"]["O2g"][K, I - 1] < run["O2gmol"][K, I]:
                     O2gmol, resetO2g = out["soil"]["O2g"][K, I - 1], 1
+            if self.paddy is not None:  # gases reset daily from the flood schedule
+                resetCO2g, resetO2g = 1, 0
+                siCO2g, CO2gmol = paddy.co2_phase(ds, k, i)
+                w("-component Oxg(g)\n")
+                w("    %10s %g\n", "-si", run["si_O2g"][K, I])
+                w("    %10s %g\n", "-moles", paddy.eqphase_moles(ds, self.targH2O[K, I], k, i))
+                w("-component Mtg(g)\n")
+                w("    %10s %g\n", "-si", run["si_CH4g"][K, I])
+                w("    %10s %g\n", "-moles", 0)
             if resetCO2g:
                 w("-component CO2(g)\n")
-                w("    %10s %g\n", "-si", run["si_CO2g"][K, I])
+                w("    %10s %g\n", "-si", siCO2g if self.paddy is not None else run["si_CO2g"][K, I])
                 w("    %10s %g\n", "-moles", CO2gmol)
             if resetO2g:
                 w("-component O2(g)\n")
@@ -1688,6 +1733,8 @@ class PhreeqcRun:
             w("FreeBioNfix\n")
             w("    %10s %g %g \n", "-d_params ", cell["CFannET"][K], targ)
             w("    %10s %g \n", "-tol", stg["tol"])
+        if self.paddy is not None:
+            paddy.modify_kinetics(w, ds, out, k, i, targ)
         w("INCREMENTAL_REACTIONS true\n")
         w("USE kinetics %d;\n", k)
 
@@ -1852,6 +1899,8 @@ class PhreeqcRun:
             w("    %14s %g\n", "-m0", 0)
             w("    %10s %g \n", "-parms ", stg["urease"])
             w("    %10s %g \n", "-tol", tol)
+        if self.paddy is not None:
+            paddy.init_kinetics(w, ds, k, i, targ, tol)
         md = self.out["metadata"].setdefault("PHREEQC", {})
         if stg["usecvode"]:
             w("-cvode true\n-cvode_order 5\n-cvode_steps %d\n", self.cvode_steps)

@@ -50,12 +50,15 @@ RATES
 Paddy_rates
 -start
   10 f = PARM(1) : sw = PARM(2) : omin = PARM(3) : uin = PARM(4) : tcel = PARM(5)
+  # gas exchange: floodwater weight on this cell (top cell only), k_fw m yr-1, cell thickness m, ebullition yr-1
+  15 wfw = PARM(6) : kfw = PARM(7) : dz = PARM(8) : keb = PARM(9)
   20 sec = 3.1536e7
   30 fsat = 2 * sw : IF fsat > 1 THEN fsat = 1
   40 q2 = 2 ^ ((tcel - 25) / 10) : q3 = 3 ^ ((tcel - 25) / 10)
   # pools, mol m-3 bulk
-  50 g2 = KIN("Om") * f : fh = KIN("Ferrihydrite") * f : gr = KIN("Green_rust") * f
-  60 gt = KIN("Goethite_k") * f : fes = KIN("FeS_k") * f : urea = KIN("Urea_k") * f
+  45 fw = f / TOT("water")
+  50 g2 = KIN("Om") * fw : fh = KIN("Ferrihydrite") * fw : gr = KIN("Green_rust") * fw
+  60 gt = KIN("Goethite_k") * fw : fes = KIN("FeS_k") * fw : urea = KIN("Urea_k") * fw
   # porewater, mol/L (concentrations, as SCEPTER without activities)
   70 o2 = TOT("Oxg") : no3 = TOT("N") : so4 = TOT("S(6)") : ch4 = TOT("Mtg") : n2o = TOT("None") / 2
   80 nh4 = MOL("AmmH+") : fe2 = TOT("Fe(2)") : fe2f = MOL("Fe+2") : hs = MOL("Hsg-") : hp = MOL("H+")
@@ -95,13 +98,19 @@ Paddy_rates
  390 rg2n21 = den * r : rg2n0 = 1.25 * den * (1 - r)
  400 rg2n2p = 300 * q2 * fg2 * n2o / (n2o + 5e-6) * 1e-3 / (no3 + 1e-3) * fo2 / (1 + (hp / 10 ^ -5.5) ^ 2) * fsat
  410 rurea = 73 * 2 ^ ((tcel - 25) / 10) * urea
+ # gases (spec 6.1-6.2): CH4 ebullition above 0.4 atm; floodwater exchange with the atmosphere
+ 420 kh4 = 10 ^ -2.86 : kho = 10 ^ -2.8983 : khc = 10 ^ -1.468
+ 430 rch4eb = 0 : IF ch4 > kh4 * 0.4 THEN rch4eb = keb * f * (ch4 - kh4 * 0.4)
+ 440 fwr = wfw * kfw * 1000 / dz
+ 450 rfwo2 = fwr * (o2 - kho * 0.21) : rfwco2 = fwr * (MOL("CO2") - khc * 4.2e-4) : rfwch4 = fwr * (ch4 - kh4 * 1.9e-6)
  # PUT the rates in mol kgw-1 s-1
- 500 c = 1 / (f * sec)
+ 500 c = 1 / (fw * sec)
  510 PUT(rg2o2 * c, 1) : PUT(rg2fe3 * c, 2) : PUT(rg2gr * c, 3) : PUT(rg2gt * c, 4)
  520 PUT(rg2so4 * c, 5) : PUT(rg2ch4 * c, 6) : PUT(rch4o2 * c, 7) : PUT(rfe2o2 * c, 8)
  530 PUT(rfe2gr * c, 9) : PUT(rgroxy * c, 10) : PUT(rfe2fs * c, 11) : PUT(rfesox * c, 12)
  540 PUT(ramo2o * c, 13) : PUT(rg2n21 * c, 14) : PUT(rg2n0 * c, 15) : PUT(rg2n2p * c, 16)
  550 PUT(rurea * c, 17) : PUT(omin * c, 18) : PUT(uin * c, 19)
+ 560 PUT(rch4eb * c, 20) : PUT(rfwo2 * c, 21) : PUT(rfwco2 * c, 22) : PUT(rfwch4 * c, 23)
  600 SAVE 0
 -end
 
@@ -200,5 +209,21 @@ FeS_k
 Urea_k
 -start
  10 SAVE (GET(17) - GET(19)) * TIME
+-end
+ch4eb
+-start
+ 10 SAVE GET(20) * TIME
+-end
+fwo2
+-start
+ 10 SAVE GET(21) * TIME
+-end
+fwco2
+-start
+ 10 SAVE GET(22) * TIME
+-end
+fwch4
+-start
+ 10 SAVE GET(23) * TIME
 -end
 END

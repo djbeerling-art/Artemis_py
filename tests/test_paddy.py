@@ -25,7 +25,8 @@ EXPECT = {
     "fe2fs": {"Fe(2)": -1, "Hsg": -1}, "fesox": {"Oxg": -2, "Fe(2)": 1, "S(6)": 1},
     "amo2o": {"Amm": -1, "Oxg": -2, "N": 1}, "g2n21": {"C(4)": 1, "N": -1, "None": 1},
     "g2n0": {"C(4)": 1, "N": -0.8, "Nzero": 0.8}, "g2n2p": {"C(4)": 1, "None": -4, "Nzero": 4},
-    "ureah": {"C(4)": 1, "Amm": 2},
+    "ureah": {"C(4)": 1, "Amm": 2}, "ch4eb": {"Mtg": -1}, "fwo2": {"Oxg": -1}, "fwco2": {"C(4)": -1},
+    "fwch4": {"Mtg": -1},
 }
 TOTALS = ["C(4)", "C(-4)", "S(6)", "S(-2)", "Fe(2)", "Fe(3)", "O(0)", "Mtg", "Oxg", "Hsg", "N", "Amm", "None", "Nzero"]
 
