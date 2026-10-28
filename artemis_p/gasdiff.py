@@ -7,10 +7,10 @@ Turned on by ``ds['gasdiff']``, a dict with
             as getsoilCO2g) or ``"rootresp"`` (roots only, for runs where decomposition
             releases its own CO2 in PHREEQC, ``releaseCO2`` = 1)
 ``top``     ``"open"`` (default, the atmosphere above the top cell) or ``"closed"`` (no flux)
-``model``   gas-phase tortuosity: ``"MQ"`` (default, Millington and Quirk 1961,
-            ta^(10/3)/phi^2), ``"Moldrup"`` (Moldrup et al. 2000, ta^2.5/phi, for undisturbed
-            soils; less steep in wet soil) or ``"SCEPTER"`` (SCEPTER's default, Archie-type
-            ta^3.4/phi, for the benchmark)
+``model``   gas-phase tortuosity: ``"Moldrup"`` (default, Moldrup et al. 2000, ta^2.5/phi,
+            for undisturbed field soils; less steep in wet soil), ``"MQ"`` (Millington and
+            Quirk 1961, ta^(10/3)/phi^2, for the sensitivity runs) or ``"SCEPTER"`` (SCEPTER's
+            default, Archie-type ta^3.4/phi, for the benchmark)
 ``icegap``  air-filled porosity left open through ice (default 0.02): frozen soil is not
             sealed, but the ice-filled pores otherwise count as closed to gas
 ``feedback`` 1 (default) to add the gas each cell's chemistry takes up or releases
@@ -23,13 +23,14 @@ Turned on by ``ds['gasdiff']``, a dict with
 
 This replaces Cerling's (1991) analytic steady state (getsoilCO2g) with a backward-Euler
 finite-volume step of one day on the cell grid. The effective diffusivity is
-Millington and Quirk (1961) in both phases,
 
-    D = Da(T) ta^(10/3)/phi^2 + beta(T) Dw(T) tw^(10/3)/phi^2
+    D = Da(T) f(ta) + beta(T) Dw(T) tw^(10/3)/phi^2
 
-and the storage is (ta + beta tw) per unit soil volume, where ta and tw are the air- and
-water-filled porosities (ice fills pores, so ta is from the total water), phi the porosity and beta the dimensionless Henry solubility, so
-concentrations are gas-equivalent (mol per cm3 of air). Respiration is spread over the
+with f(ta) = ta^2.5/phi by default (``model``) and Millington and Quirk (1961) in the
+water. The storage is (ta + beta tw) per unit soil volume, where ta and tw are the air-
+and water-filled porosities (ice fills pores, so ta is from the total water), phi the
+porosity and beta the dimensionless Henry solubility, so concentrations are
+gas-equivalent (mol per cm3 of air). Respiration is spread over the
 depth with Cerling's exponential profile (cdepth) above the impermeable depth. Each day's
 partial pressure is passed to PHREEQC as the CO2(g) (O2(g)) saturation index; the gas
 moles stay as set by gasmoles (``fixCO2gmol``), so within a day the gas phase holds the
@@ -60,7 +61,7 @@ def config(ds):
     g.setdefault("top", "open")
     g.setdefault("feedback", 1)
     g.setdefault("tau", 30.0)
-    g.setdefault("model", "MQ")
+    g.setdefault("model", "Moldrup")
     g.setdefault("icegap", 0.02)
     return g
 
