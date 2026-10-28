@@ -9,7 +9,7 @@ from artemis_p.paddy import FORMULA, N2C, OM_REACTIONS, POOLS  # noqa: E402
 
 def kinetics(n, pools, f=500.0, sw=1.0, omin=0.0, uin=0.0, tc=25.0, n2c=N2C, steps="86400 in 1", extra=""):
     """KINETICS n; pools in mol m-3 bulk, converted to mol per kgw with f."""
-    L = [f"KINETICS {n}", "Paddy_rates", "    -formula H 0", "    -m 1", f"    -parms {f} {sw} {omin} {uin} {tc} 0 36.5 0.01 0"]  # no gas exchange
+    L = [f"KINETICS {n}", "Paddy_rates", "    -formula H 0", "    -m 1", f"    -parms {1 / f} {sw} {omin} {uin} {tc} 0 36.5 0.01 0"]  # 1 kgw in 1/f m3; no gas exchange
     for r, form in FORMULA.items():
         if r in OM_REACTIONS and n2c:
             form += f" Amm {n2c}"

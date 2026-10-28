@@ -49,14 +49,19 @@ Oxg(g)
 RATES
 Paddy_rates
 -start
-  10 f = PARM(1) : sw = PARM(2) : omin = PARM(3) : uin = PARM(4) : tcel = PARM(5)
+  # vol: m3 of bulk soil that this solution's water belongs to (pools and inputs scale with it, not with the water)
+  10 vol = PARM(1) : sw = PARM(2) : omin = PARM(3) : uin = PARM(4) : tcel = PARM(5)
   # gas exchange: floodwater weight on this cell (top cell only), k_fw m yr-1, cell thickness m, ebullition yr-1
   15 wfw = PARM(6) : kfw = PARM(7) : dz = PARM(8) : keb = PARM(9)
   20 sec = 3.1536e7
   30 fsat = 2 * sw : IF fsat > 1 THEN fsat = 1
+  # not in SCEPTER: reactions stop below 5% saturation and are full above 15% (ARTEMIS's
+  # frozen cells keep 0.01 mm of liquid; bulk-volume rates swamp it and stall the solver)
+  35 fliq = (sw - 0.05) / 0.1 : IF fliq > 1 THEN fliq = 1
+  36 IF fliq < 0 THEN fliq = 0
   40 q2 = 2 ^ ((tcel - 25) / 10) : q3 = 3 ^ ((tcel - 25) / 10)
   # pools, mol m-3 bulk
-  45 fw = f / TOT("water")
+  45 fw = 1 / vol : f = TOT("water") / vol
   50 g2 = KIN("Om") * fw : fh = KIN("Ferrihydrite") * fw : gr = KIN("Green_rust") * fw
   60 gt = KIN("Goethite_k") * fw : fes = KIN("FeS_k") * fw : urea = KIN("Urea_k") * fw
   # porewater, mol/L (concentrations, as SCEPTER without activities)
@@ -104,12 +109,12 @@ Paddy_rates
  440 fwr = wfw * kfw * 1000 / dz
  450 rfwo2 = fwr * (o2 - kho * 0.21) : rfwco2 = fwr * (MOL("CO2") - khc * 4.2e-4) : rfwch4 = fwr * (ch4 - kh4 * 1.9e-6)
  # PUT the rates in mol kgw-1 s-1
- 500 c = 1 / (fw * sec)
+ 500 c = fliq / (fw * sec)
  510 PUT(rg2o2 * c, 1) : PUT(rg2fe3 * c, 2) : PUT(rg2gr * c, 3) : PUT(rg2gt * c, 4)
  520 PUT(rg2so4 * c, 5) : PUT(rg2ch4 * c, 6) : PUT(rch4o2 * c, 7) : PUT(rfe2o2 * c, 8)
  530 PUT(rfe2gr * c, 9) : PUT(rgroxy * c, 10) : PUT(rfe2fs * c, 11) : PUT(rfesox * c, 12)
  540 PUT(ramo2o * c, 13) : PUT(rg2n21 * c, 14) : PUT(rg2n0 * c, 15) : PUT(rg2n2p * c, 16)
- 550 PUT(rurea * c, 17) : PUT(omin * c, 18) : PUT(uin * c, 19)
+ 550 PUT(rurea * c, 17) : PUT(omin / (fw * sec), 18) : PUT(uin / (fw * sec), 19)
  560 PUT(rch4eb * c, 20) : PUT(rfwo2 * c, 21) : PUT(rfwco2 * c, 22) : PUT(rfwch4 * c, 23)
  600 SAVE 0
 -end

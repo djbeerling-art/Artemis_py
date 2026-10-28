@@ -1,10 +1,10 @@
-# Rice paddy chemistry (step 1: batch cell)
+# Rice paddy chemistry
 
 The flooded-soil reactions of David Beerling's SCEPTER paddy module, rewritten as
 PHREEQC `RATES` from the process spec (`paddy/docs/riceland_process_spec.md` on the
 SCEPTER branch `paddy/fe3-reduction`, v15, commit 771da05). The spec is the source,
-not the Fortran. This is step 1 of the design note: one cell, compared against a
-SCEPTER run. The rates are not yet wired into `PhreeqcRun`.
+not the Fortran. Step 1 of the design note is one cell, compared against a SCEPTER run. Step 2 puts the
+rates in every cell of an ARTEMIS column (`artemis_p/paddy.py`).
 
 | File | What it is |
 |---|---|
@@ -12,7 +12,8 @@ SCEPTER run. The rates are not yet wired into `PhreeqcRun`.
 | `kinetics_block.py` | the KINETICS block: each reaction's net change to the solution, and the solid pools |
 | `batch.py` | a PHREEQC batch cell set up like cell 1 of a SCEPTER reference run |
 | `read_scepter.py` | reads a SCEPTER run's profile files |
-| `figure.py` | the comparison figure |
+| `figure.py` | the batch comparison figure |
+| `column_figure.py` | the step 2 figure: three depths of an ARTEMIS column through a season |
 
 ## How the reactions are written
 
@@ -52,3 +53,37 @@ expected.
 
 With the database's own exchanger, NH4+ goes onto the exchange sites, so
 nitrification and the loss of O2 are slower than in SCEPTER.
+
+## Step 2: the paddy chemistry in an ARTEMIS column
+
+`ds['paddy']` turns it on (options in the `artemis_p/paddy.py` docstring), and
+`python scripts/run_paddy.py rCcomp WORKDIR NDAYS floodday=152,flooddays=113` runs the
+control column as a paddy. In paddy mode:
+
+- **Hydrology.** On flooded days every cell is saturated and `q` (0.5 m/yr) percolates out
+  of the bottom. The Richards solution stands on drained days. Irrigation makes up what
+  the soil needs, and rain the soil cannot take runs off.
+- **Gases.** Flooded cells have no gas phase. CH4 leaves by ebullition above 0.4 atm, and
+  the top cell exchanges O2, CO2 and CH4 with the atmosphere through the floodwater
+  (spec 6.1 and 6.2). Both are kinetic: a gas phase that switched on and off within a
+  day's integration stalled the solver. Drained cells keep ARTEMIS's soil CO2 and take O2
+  as Oxg(g), so Fe(II) and CH4 oxidation stay kinetic. New solutions carry Oxg, not
+  coupled O(0), so nothing oxidises Fe(II) at equilibrium.
+- **Pools** are carried from day to day in moles per cell, and the rates see them per
+  m3 of soil whatever water the cell holds.
+- SWAT's OM and N kinetics are off; crop uptake stays. Paddy runs use CVODE.
+- **Not in SCEPTER:** reactions ramp to zero below 15% saturation and stop below 5%.
+  ARTEMIS's frozen cells keep 0.01 mm of liquid, and the full rates in that water stalled
+  the solver.
+
+Runs with the executable (the default engine) and no cell workers. The in-memory engine
+with cellworkers=4 failed on the surface model's convergence in some cells.
+
+`paddy_column_winter_test.png` is a test of the flood and drain transitions: 9 drained
+days, a 113-day flood from 10 January, then drained (rCcomp, 2015). Soil temperature
+averaged 5-6 C over the flood, so the chemistry is slow. The acceptor sequence is right:
+O2 goes first, then nitrate, then Fe(III) is reduced, and CH4 builds slowly. The 5 cm cell
+(10 cm thick) stays oxic because floodwater O2 reaches it all. The nitrate jump on day
+~118 is the season's UAN28 fertiliser. Over the flood, 0.09 mol CH4 m-2 (14 kg ha-1) was
+produced. The SCEPTER line is a closed flood at 25 C in a 1 cm cell, so it is a guide
+only. A summer season (from day of year 152) comes next.

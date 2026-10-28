@@ -31,7 +31,7 @@ def main(work, png, scepter=None):
     fl = ds["paddy"]["flooded"][:n]
     vsoil = np.asarray(cell["vsoil"], float)[:, None]
     M = {q: v[:, :n] / vsoil * 1000 for q, v in out["run"]["paddy"].items()}  # mol m-3
-    cells = [0, 2, 4]
+    cells = [0, 1, 2]
     panels = [
         ("Dissolved O$_2$ (µM)", soil["Oxg"] * 1e6),
         ("Nitrate (µM)", soil["N"] * 1e6),

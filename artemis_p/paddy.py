@@ -112,7 +112,9 @@ def apply_hydrology(ds):
     out_new = outperc - np.cumsum(corr, axis=0)
     flnext = np.append(fl[1:], fl[-1])
     extra = np.where(flnext, p["q"] - out_new[-1], 0.0)
-    extra = np.fmax(extra, -infil)  # standing water above what the soil takes runs off
+    # standing water above what the soil takes runs off; keep a trace of infiltration, as
+    # setmixfracs divides by it
+    extra = np.fmax(extra, np.fmin(0, 1e-3 - infil))
     outperc[:] = out_new + extra
     inperc[0] = inperc[0] + extra
     inperc[1:] = outperc[:-1]
@@ -163,14 +165,19 @@ def eqphase_moles(ds, targ, k, i):
 
 
 def kinetics_parms(ds, k, i, targ):
-    """Paddy_rates -parms: f (kg water per m3 bulk), saturation, OM and urea inputs,
-    temperature, floodwater weight (top cell, spec 6.2), k_fw (m/yr), thickness (m), ebullition."""
+    """Paddy_rates -parms: the bulk volume (m3) per kg of the cell's solution, saturation, OM
+    and urea inputs, temperature, floodwater weight (top cell, spec 6.2), k_fw (m/yr),
+    thickness (m), ebullition.
+
+    The volume ties the pools and inputs to the soil, whatever water the solution holds
+    (a frozen cell keeps 0.01 mm of liquid). ``targ`` is ARTEMIS's per-cell divisor: 1 when
+    the solution holds the cell's real water, the cell's water (kg) when it holds 1 kg."""
     run, cell, p = ds["run"], ds["cell"], ds["paddy"]
     K, I = k - 1, i - 1
-    f = 1000 * run["Sws"][K, I]
+    vol = cell["vsoil"][K] / 1000 / targ
     sw = run["Sws"][K, I] / cell["por"][K]
     wfw = min(1, max(0, (sw - 0.9) / 0.1)) if k == 1 else 0
-    return (f, sw, p["omin"][K], p["uin"][K], run["soiltemp"][K, I], wfw, p["kfw"] * 365,
+    return (vol, sw, p["omin"][K], p["uin"][K], run["soiltemp"][K, I], wfw, p["kfw"] * 365,
             cell["thickness"][K] / 100, p["keb"])
 
 

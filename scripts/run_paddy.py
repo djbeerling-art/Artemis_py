@@ -76,6 +76,8 @@ def main(name, work, ndays, options=None):
     for i in range(1, int(ndays) + 1):
         res = r.run_day(i)
         if not res.ok:
+            if r.engine is not None:  # the state when the day failed, for a look with the executable
+                r.engine.write_dump(r.fname + ".dmp")
             sys.exit(f"PHREEQC failed on day {i}: {res.errors[:3]}")
         if i % 20 == 0:
             print(f"day {i}: {time.time() - t0:.0f} s", flush=True)
