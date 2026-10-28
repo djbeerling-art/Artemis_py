@@ -21,7 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import paddy, phreeqc
+from . import gasdiff, paddy, phreeqc
 from .fixes import active, enabled as fixed
 from .mformat import sprintf
 from .obs import assessrun2
@@ -335,6 +335,7 @@ class PhreeqcRun:
         out["metadata"]["istart0"] = self.istart
         self.ilast = min(self.ilast, stg["ndata"])
         gasmoles(ds, CO2gmol=stg["fixCO2gmol"], O2gmol=stg["fixO2gmol"])
+        self.gasdiff = gasdiff.config(ds)
 
         if not stg["equilibratesurface"]:
             self._uncharged_surface_sites()
@@ -878,6 +879,8 @@ class PhreeqcRun:
         run = ds["run"]
         tic = time.time()
         self.tv.clear()
+        if self.gasdiff is not None:
+            gasdiff.update_day(ds, out, i, self.targH2O, {"CO2": stg["fixCO2gmol"], "O2": stg["fixO2gmol"]})
         text = self.write_input(i, now=now)
         fname = Path(self.fname)
         infile = fname.with_name(fname.name + ".in")
